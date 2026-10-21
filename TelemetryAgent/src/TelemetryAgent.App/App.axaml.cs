@@ -22,7 +22,11 @@ public partial class App : Application
             _mainWindow = new MainWindow();
             desktop.MainWindow = _mainWindow;
 
-            SetupTrayIcon(_mainWindow, desktop);
+            _mainWindow.Show();
+            _mainWindow.Activate();
+
+            // Initialize tray icon asynchronously so missing Wine explorer/systray doesn't block window render
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => SetupTrayIcon(_mainWindow, desktop));
         }
 
         base.OnFrameworkInitializationCompleted();

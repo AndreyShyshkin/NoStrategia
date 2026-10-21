@@ -3,6 +3,7 @@ using Avalonia.Win32;
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using TelemetryAgent.Core.Mock;
@@ -33,28 +34,32 @@ class Program
             return;
         }
 
+        bool isWine = IsRunningUnderWine();
+        bool forceGpu = args.Any(a => a.Equals("--gpu", StringComparison.OrdinalIgnoreCase));
         bool forceSoftware = args.Any(a => a.Equals("--software", StringComparison.OrdinalIgnoreCase) ||
                                           a.Equals("--software-render", StringComparison.OrdinalIgnoreCase))
                              || Environment.GetEnvironmentVariable("AVALONIA_SOFTWARE") == "1";
 
-        if (forceSoftware)
-        {
-            BuildAvaloniaApp(forceSoftware: true).StartWithClassicDesktopLifetime(args);
-            return;
-        }
+        // Under Wine / Proton / FEX-Emu: default to rock-solid Software Rendering to avoid DXVK/ANGLE JIT deadlocks
+        bool useSoftware = forceSoftware || (isWine && !forceGpu);
 
         try
         {
-            // Attempt standard platform detection with hardware backends
-            BuildAvaloniaApp(forceSoftware: false).StartWithClassicDesktopLifetime(args);
+            string bootLog = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_boot.log");
+            File.WriteAllText(bootLog, $"[BOOT {DateTime.UtcNow:O}] IsWine={isWine}, UseSoftware={useSoftware}, OS={Environment.OSVersion}, Arch={RuntimeInformation.ProcessArchitecture}\n");
+        }
+        catch { }
+
+        try
+        {
+            BuildAvaloniaApp(forceSoftware: useSoftware).StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
-            // Automatic fallback for Wine / Proton / FEX-Emu when GPU/D3D driver initialization fails
             try
             {
                 string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
-                File.AppendAllText(logPath, $"[INFO] GPU acceleration failed ({ex.Message}). Retrying with Skia Software Rasterizer under Wine/FEX...\n");
+                File.AppendAllText(logPath, $"[STARTUP RETRY]: {ex.Message}. Retrying with fallback software rasterizer...\n");
 
                 BuildAvaloniaApp(forceSoftware: true).StartWithClassicDesktopLifetime(args);
             }
@@ -67,16 +72,30 @@ class Program
         }
     }
 
+    public static bool IsRunningUnderWine()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try
+        {
+            IntPtr hNtdll = NativeLibrary.Load("ntdll.dll");
+            return NativeLibrary.TryGetExport(hNtdll, "wine_get_version", out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static AppBuilder BuildAvaloniaApp(bool forceSoftware = false)
     {
         var renderingModes = forceSoftware
             ? new[] { Win32RenderingMode.Software }
             : new[]
             {
-                Win32RenderingMode.AngleEgl,
+                Win32RenderingMode.Software,
                 Win32RenderingMode.Wgl,
-                Win32RenderingMode.Vulkan,
-                Win32RenderingMode.Software
+                Win32RenderingMode.AngleEgl,
+                Win32RenderingMode.Vulkan
             };
 
         return AppBuilder.Configure<App>()
