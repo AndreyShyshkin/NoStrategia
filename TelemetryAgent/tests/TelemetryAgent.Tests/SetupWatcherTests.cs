@@ -48,4 +48,39 @@ public class SetupWatcherTests
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task SetupWatcher_DiscoversExistingActiveSetupOnScan()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "NoStrategia_TestScan_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Create car/track structure similar to Wine ACC directory:
+            // Setups/bentley_continental_gt3_2018/Spa/Active.json
+            string setupPath = await SetupSampleGenerator.CreateTestSetupFileAsync(
+                tempDir,
+                carName: "bentley_continental_gt3_2018",
+                track: "Spa",
+                setupName: "Active.json",
+                frontArb: 5,
+                rearArb: 3);
+
+            var watcher = new SetupWatcherService(tempDir);
+            var scanned = await watcher.ScanExistingSetupsAsync();
+
+            Assert.NotNull(scanned);
+            Assert.Equal("Active.json", scanned.FileName);
+            Assert.Equal("bentley_continental_gt3_2018", scanned.CarModel);
+            Assert.Equal("Spa", scanned.Track);
+
+            // Test Query by Car & Track
+            var queried = await watcher.TryLoadSetupForCarAndTrackAsync("bentley_continental_gt3_2018", "Spa");
+            Assert.NotNull(queried);
+            Assert.Equal("Active.json", queried.FileName);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

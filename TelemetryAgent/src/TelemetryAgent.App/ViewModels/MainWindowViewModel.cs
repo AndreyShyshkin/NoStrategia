@@ -39,6 +39,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private string _setupWatcherBadge = "ACTIVE";
     private string _lastSetupSynced = "None (Watching Documents/ACC/Setups)";
     private string _lastSetupHash = "--";
+    private string _watchDirectoryText = "Scanning Setups...";
 
     // Live Mini-HUD
     private string _speedText = "0";
@@ -47,6 +48,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private double _rpmProgress = 0;
     private double _throttleProgress = 0;
     private double _brakeProgress = 0;
+    private string _steerText = "0.0° CENTER";
+    private float _steerAngleDegrees = 0f;
+    private double _steerProgressLeft = 0.0;
+    private double _steerProgressRight = 0.0;
     private string _lapTimeText = "00:00.000";
     private string _sectorText = "Sector: -";
     private string _tyrePressuresText = "FL: -- | FR: -- | RL: -- | RR: --";
@@ -102,6 +107,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public string SetupWatcherBadge { get => _setupWatcherBadge; set => SetProperty(ref _setupWatcherBadge, value); }
     public string LastSetupSynced { get => _lastSetupSynced; set => SetProperty(ref _lastSetupSynced, value); }
     public string LastSetupHash { get => _lastSetupHash; set => SetProperty(ref _lastSetupHash, value); }
+    public string WatchDirectoryText { get => _watchDirectoryText; set => SetProperty(ref _watchDirectoryText, value); }
 
     public string SpeedText { get => _speedText; set => SetProperty(ref _speedText, value); }
     public string GearText { get => _gearText; set => SetProperty(ref _gearText, value); }
@@ -109,6 +115,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public double RpmProgress { get => _rpmProgress; set => SetProperty(ref _rpmProgress, value); }
     public double ThrottleProgress { get => _throttleProgress; set => SetProperty(ref _throttleProgress, value); }
     public double BrakeProgress { get => _brakeProgress; set => SetProperty(ref _brakeProgress, value); }
+    public string SteerText { get => _steerText; set => SetProperty(ref _steerText, value); }
+    public float SteerAngleDegrees { get => _steerAngleDegrees; set => SetProperty(ref _steerAngleDegrees, value); }
+    public double SteerProgressLeft { get => _steerProgressLeft; set => SetProperty(ref _steerProgressLeft, value); }
+    public double SteerProgressRight { get => _steerProgressRight; set => SetProperty(ref _steerProgressRight, value); }
     public string LapTimeText { get => _lapTimeText; set => SetProperty(ref _lapTimeText, value); }
     public string SectorText { get => _sectorText; set => SetProperty(ref _sectorText, value); }
     public string TyrePressuresText { get => _tyrePressuresText; set => SetProperty(ref _tyrePressuresText, value); }
@@ -158,6 +168,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 #endif
 
         _coordinator = new TelemetryAgentCoordinator(config);
+        _setupsDirectory = _coordinator.SetupWatcher.WatchDirectory;
+        _watchDirectoryText = _coordinator.SetupWatcher.WatchDirectory;
         _coordinator.StatusChanged += OnCoordinatorStatusChanged;
         _coordinator.FrameDispatched += OnFrameDispatched;
         _coordinator.SetupSynced += OnSetupSynced;
@@ -200,21 +212,66 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                     break;
             }
 
-            // 2. Game status
+            // 2. Game status (with explicit Lobby / Garage / Track session states)
             switch (status.GameLink)
             {
                 case GameLinkState.Connected:
-                    GameStatusBadge = "CONNECTED";
-                    GameStatusColor = new SolidColorBrush(Color.Parse("#00E676"));
-                    GameDetails = "Assetto Corsa Competizione Shared Memory active";
-                    CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                    switch (status.SessionPhase)
+                    {
+                        case GameSessionPhase.InLobbyOrMenu:
+                            GameStatusBadge = "IN LOBBY / MENU";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#FFD600")); // Gold / Yellow
+                            GameDetails = "Game active, waiting in lobby or main menu";
+                            CarAndTrackText = string.IsNullOrEmpty(status.CurrentCarModel)
+                                ? "Lobby / Car Selection"
+                                : $"{status.CurrentCarModel} (In Lobby)";
+                            break;
+
+                        case GameSessionPhase.InGarageSetup:
+                            GameStatusBadge = "GARAGE / SETUP";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#00E5FF")); // Cyan
+                            GameDetails = "Tuning car setup in pit box menu";
+                            CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                            break;
+
+                        case GameSessionPhase.InPitLane:
+                            GameStatusBadge = "PIT LANE (10 HZ)";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#FF9100")); // Orange
+                            GameDetails = "Pit limiter active / stationary in pit box";
+                            CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                            break;
+
+                        case GameSessionPhase.SessionPaused:
+                            GameStatusBadge = "SESSION PAUSED";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#2979FF")); // Blue
+                            GameDetails = "Game paused, telemetry idling at 0.5 Hz";
+                            CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                            break;
+
+                        case GameSessionPhase.Replay:
+                            GameStatusBadge = "REPLAY MODE";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#AA00FF")); // Purple
+                            GameDetails = "Viewing session replay";
+                            CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                            break;
+
+                        case GameSessionPhase.LiveOnTrack:
+                        default:
+                            GameStatusBadge = "LIVE ON TRACK";
+                            GameStatusColor = new SolidColorBrush(Color.Parse("#00E676")); // Neon green
+                            GameDetails = "Assetto Corsa Competizione (Live driving)";
+                            CarAndTrackText = $"{status.CurrentCarModel} @ {status.CurrentTrack}";
+                            break;
+                    }
                     break;
+
                 case GameLinkState.MockEmulation:
                     GameStatusBadge = "MOCK SIMULATOR";
                     GameStatusColor = new SolidColorBrush(Color.Parse("#00E5FF")); // Cyan
                     GameDetails = "Autonomous GT3 Simulation Engine (Spa)";
                     CarAndTrackText = "Mercedes-AMG GT3 Evo @ Circuit de Spa";
                     break;
+
                 default:
                     GameStatusBadge = "SEARCHING";
                     GameStatusColor = new SolidColorBrush(Color.Parse("#FF9100"));
@@ -242,6 +299,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
             PacketsCounterText = $"Sent: {status.TotalPacketsSent:N0} | Dropped: {status.TotalPacketsDropped:N0}";
 
+            if (!string.IsNullOrEmpty(status.SetupsWatchDirectory))
+            {
+                WatchDirectoryText = status.SetupsWatchDirectory;
+            }
+
             if (!string.IsNullOrEmpty(status.LastSyncedSetupName))
             {
                 LastSetupSynced = status.LastSyncedSetupName;
@@ -268,6 +330,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             RpmProgress = Math.Clamp(p.Rpm / 7500.0, 0.0, 1.0);
             ThrottleProgress = Math.Clamp(p.Gas, 0.0, 1.0);
             BrakeProgress = Math.Clamp(p.Brake, 0.0, 1.0);
+
+            // Steering angle calculation and visual deflectors
+            float steerDeg = p.SteerAngle * (180.0f / MathF.PI);
+            SteerAngleDegrees = steerDeg;
+            if (steerDeg < -0.5f)
+            {
+                SteerText = $"◀ {Math.Abs(steerDeg):F1}° L";
+                SteerProgressLeft = Math.Clamp(Math.Abs(steerDeg) / 360.0, 0.0, 1.0);
+                SteerProgressRight = 0.0;
+            }
+            else if (steerDeg > 0.5f)
+            {
+                SteerText = $"{steerDeg:F1}° R ▶";
+                SteerProgressRight = Math.Clamp(steerDeg / 360.0, 0.0, 1.0);
+                SteerProgressLeft = 0.0;
+            }
+            else
+            {
+                SteerText = "0.0° CENTER";
+                SteerProgressLeft = 0.0;
+                SteerProgressRight = 0.0;
+            }
 
             var ts = TimeSpan.FromMilliseconds(p.ICurrentTime);
             LapTimeText = $"{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds:D3}";
@@ -383,6 +467,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         }
     }
 
+    public async Task RefreshSetupsAsync()
+    {
+        FeedbackMessage = "Scanning for ACC setups...";
+        var found = await _coordinator.RefreshSetupsAsync();
+        if (found != null)
+        {
+            LastSetupSynced = found.FileName;
+            LastSetupHash = $"SHA-256: {found.Hash[..12]}... (Synced)";
+            FeedbackMessage = $"Found & synced setup: {found.FileName}";
+        }
+        else
+        {
+            FeedbackMessage = $"No setup found in {_coordinator.SetupWatcher.WatchDirectory}";
+        }
+    }
+
     public void ToggleSettings()
     {
         IsSettingsOpen = !IsSettingsOpen;
@@ -396,6 +496,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _coordinator.Configuration.EnableAdaptiveThrottling = EnableAdaptiveThrottling;
         _coordinator.Configuration.SetupsDirectory = SetupsDirectory;
         _coordinator.Configuration.MinimizeToTrayOnClose = MinimizeToTrayOnClose;
+
+        if (!string.IsNullOrWhiteSpace(SetupsDirectory) && SetupsDirectory != _coordinator.SetupWatcher.WatchDirectory)
+        {
+            _coordinator.SetupWatcher.SetDirectory(SetupsDirectory);
+            WatchDirectoryText = SetupsDirectory;
+            _ = RefreshSetupsAsync();
+        }
 
         IsSettingsOpen = false;
         FeedbackMessage = "Settings saved successfully.";

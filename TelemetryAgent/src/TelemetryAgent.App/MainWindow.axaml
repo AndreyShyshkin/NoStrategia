@@ -158,13 +158,26 @@
                                           Fill="#FFD600" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" />
                                     <TextBlock Text="SETUP INTERCEPTOR" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" VerticalAlignment="Center" />
                                 </StackPanel>
-                                <Border Grid.Column="1" Background="#122B1E" CornerRadius="12" Padding="10,3">
-                                    <TextBlock Text="ACTIVE" FontSize="11" FontWeight="Bold" Foreground="#00E676" />
-                                </Border>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                    <Button Click="OnRefreshSetupsClicked" Background="#1C1E2C" BorderBrush="#35384D" BorderThickness="1"
+                                            CornerRadius="4" Padding="6,2" ToolTip.Tip="Scan for active setup in Wine/Proton/Windows Documents">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Path Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+                                                  Fill="#00E5FF" Width="10" Height="10" Stretch="Uniform" VerticalAlignment="Center" />
+                                            <TextBlock Text="Rescan" FontSize="10" Foreground="#00E5FF" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Border Background="#122B1E" CornerRadius="12" Padding="8,3">
+                                        <TextBlock Text="ACTIVE" FontSize="10" FontWeight="Bold" Foreground="#00E676" />
+                                    </Border>
+                                </StackPanel>
                             </Grid>
                             <TextBlock Text="{Binding LastSetupSynced}" FontSize="13" Foreground="#FFFFFF" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             <Border Background="#1C1E2C" CornerRadius="6" Padding="10,6">
-                                <TextBlock Text="{Binding LastSetupHash}" FontSize="11" Foreground="#8B90A0" TextTrimming="CharacterEllipsis" />
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Grid.Column="0" Text="{Binding LastSetupHash}" FontSize="11" Foreground="#8B90A0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Text="{Binding WatchDirectoryText}" FontSize="10" Foreground="#5A5E70" TextTrimming="CharacterEllipsis" Margin="8,0,0,0" ToolTip.Tip="{Binding WatchDirectoryText}" />
+                                </Grid>
                             </Border>
                         </StackPanel>
                     </Border>
@@ -196,7 +209,7 @@
                                 </StackPanel>
                             </StackPanel>
 
-                            <!-- RPM Gauge & Pedals -->
+                            <!-- RPM Gauge, Pedals & Steering Wheel -->
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="8" Margin="10,0">
                                 <!-- RPM -->
                                 <StackPanel Spacing="3">
@@ -222,6 +235,19 @@
                                                      Background="#232638" Foreground="#FF1744" CornerRadius="4" />
                                     </StackPanel>
                                 </Grid>
+                                <!-- Steering Wheel Angle & Deflection -->
+                                <StackPanel Spacing="3">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0" Text="STEERING ANGLE" FontSize="10" Foreground="#8B90A0" FontWeight="Bold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SteerText}" FontSize="10" Foreground="#00E5FF" FontWeight="Bold" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,*">
+                                        <ProgressBar Grid.Column="0" Height="6" Minimum="0" Maximum="1" Value="{Binding SteerProgressLeft}"
+                                                     FlowDirection="RightToLeft" Background="#232638" Foreground="#00E5FF" CornerRadius="3,0,0,3" Margin="0,0,1,0" />
+                                        <ProgressBar Grid.Column="1" Height="6" Minimum="0" Maximum="1" Value="{Binding SteerProgressRight}"
+                                                     Background="#232638" Foreground="#00E5FF" CornerRadius="0,3,3,0" Margin="1,0,0,0" />
+                                    </Grid>
+                                </StackPanel>
                             </StackPanel>
 
                             <!-- Lap Timing & Tyres -->
@@ -349,8 +375,11 @@
 
                     <!-- Setups Path -->
                     <StackPanel Spacing="4">
-                        <TextBlock Text="Custom Setups Directory (empty = default Documents/ACC/Setups):" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" />
-                        <TextBox Text="{Binding SetupsDirectory}" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" Padding="10,6" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Text="Custom Setups Directory (auto-detected across Wine/Proton/Windows):" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="Rescan Now" Click="OnRefreshSetupsClicked" Background="#1C1E2C" Foreground="#00E5FF" BorderBrush="#35384D" BorderThickness="1" CornerRadius="4" Padding="8,3" FontSize="11" FontWeight="SemiBold" />
+                        </Grid>
+                        <TextBox Text="{Binding SetupsDirectory}" PlaceholderText="e.g. C:\users\steamuser\Documents\Assetto Corsa Competizione\Setups" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" Padding="10,6" />
                     </StackPanel>
 
                     <Rectangle Height="1" Fill="#242636" />

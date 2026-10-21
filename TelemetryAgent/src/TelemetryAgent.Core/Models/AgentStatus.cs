@@ -18,6 +18,17 @@ public enum GameLinkState
     MockEmulation      // Running autonomous test generator
 }
 
+public enum GameSessionPhase
+{
+    Unknown,
+    InLobbyOrMenu,     // Game process detected, in lobby / main menu (Status == 0)
+    InGarageSetup,     // In pit box setup tuning menu (IsSetupMenuVisible == 1)
+    InPitLane,         // In pit lane / pit box exit (IsInPitLane == 1)
+    LiveOnTrack,       // Live driving on track (Status == 2)
+    SessionPaused,     // In-game session paused (Status == 3)
+    Replay             // Watching replay (Status == 1)
+}
+
 public enum BackendLinkState
 {
     Disconnected,
@@ -30,6 +41,7 @@ public sealed class AgentStatus
 {
     public AgentState State { get; set; } = AgentState.Stopped;
     public GameLinkState GameLink { get; set; } = GameLinkState.Searching;
+    public GameSessionPhase SessionPhase { get; set; } = GameSessionPhase.Unknown;
     public BackendLinkState BackendLink { get; set; } = BackendLinkState.Disconnected;
     public bool SetupWatcherActive { get; set; }
 
@@ -39,9 +51,11 @@ public sealed class AgentStatus
     public long TotalPacketsDropped { get; set; }
     public double BandwidthSavingsPercentage { get; set; }
 
+    public float SteerAngleDegrees { get; set; }
     public string CurrentCarModel { get; set; } = string.Empty;
     public string CurrentTrack { get; set; } = string.Empty;
     public string IngestionEndpoint { get; set; } = string.Empty;
+    public string SetupsWatchDirectory { get; set; } = string.Empty;
     public string LastSyncedSetupName { get; set; } = string.Empty;
     public DateTime? LastSyncedSetupTime { get; set; }
 

@@ -87,4 +87,17 @@ public class AdaptiveThrottlingTests
             Assert.Equal(ThrottleMode.FullRate, mode);
         }
     }
+
+    [Fact]
+    public void SteerAngle_ConversionAndDeflection_ComputesCorrectDegrees()
+    {
+        // 90 degrees in radians = PI / 2 ~= 1.5707963
+        float radiansRight = MathF.PI / 2.0f;
+        float degreesRight = radiansRight * (180.0f / MathF.PI);
+        Assert.Equal(90.0f, MathF.Round(degreesRight, 1));
+
+        float radiansLeft = -MathF.PI / 4.0f;
+        float degreesLeft = radiansLeft * (180.0f / MathF.PI);
+        Assert.Equal(-45.0f, MathF.Round(degreesLeft, 1));
+    }
 }

@@ -44,13 +44,18 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
     private int _hzCounter;
     private double _effectiveHz;
 
+    private string _lastQueriedCar = string.Empty;
+
     public AgentStatus CurrentStatus { get { lock (_statusLock) return _status; } }
     public AgentConfiguration Configuration => _config;
     public SyntheticAnomalyInjector AnomalyInjector => _mockEngine.AnomalyInjector;
+    public ISetupWatcher SetupWatcher => _setupWatcher;
 
     public event Action<AgentStatus>? StatusChanged;
     public event Action<TelemetryPayload>? FrameDispatched;
     public event Action<SetupPayload>? SetupSynced;
+
+    public Task<SetupPayload?> RefreshSetupsAsync() => _setupWatcher.ScanExistingSetupsAsync();
 
     public TelemetryAgentCoordinator(
         AgentConfiguration? configuration = null,
@@ -163,9 +168,31 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                 // 2. Read Graphics state first to evaluate session and pit flags
                 if (!_reader.TryReadGraphics(out var graphics))
                 {
-                    UpdateStatus(s => s.GameLink = GameLinkState.Searching);
+                    UpdateStatus(s =>
+                    {
+                        s.GameLink = GameLinkState.Searching;
+                        s.SessionPhase = GameSessionPhase.Unknown;
+                    });
                     continue;
                 }
+
+                var phase = DeterminePhase(in graphics);
+
+                // Read Static data to know current car and track
+                _reader.TryReadStatic(out var staticData);
+                string car = !string.IsNullOrWhiteSpace(staticData.CarModel) ? staticData.CarModel : _status.CurrentCarModel;
+                string trk = !string.IsNullOrWhiteSpace(staticData.Track) ? staticData.Track : _status.CurrentTrack;
+
+                // If car/track changed, auto-query setups watcher for active setup
+                if (!string.IsNullOrEmpty(car) && car != _lastQueriedCar)
+                {
+                    _lastQueriedCar = car;
+                    _ = _setupWatcher.TryLoadSetupForCarAndTrackAsync(car, trk);
+                }
+
+                // Always read Physics for live input monitoring (steer angle, pedals)
+                _reader.TryReadPhysics(out var physics);
+                float steerDegrees = physics.SteerAngle * (180.0f / MathF.PI);
 
                 // 3. Adaptive Throttling
                 bool transmit = _throttlePolicy.ShouldTransmit(
@@ -179,13 +206,9 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                 if (!transmit)
                 {
                     _droppedTotal++;
-                    UpdateThrottledStatus(throttleMode, graphics);
+                    UpdateThrottledStatus(throttleMode, graphics, phase, car, trk, steerDegrees);
                     continue;
                 }
-
-                // 4. Read Physics and Static data
-                _reader.TryReadPhysics(out var physics);
-                _reader.TryReadStatic(out var staticData);
 
                 // 5. Map to lightweight telemetry payload
                 var payload = TelemetryMapper.MapToPayload(in physics, in graphics, in staticData);
@@ -197,7 +220,7 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                 FrameDispatched?.Invoke(payload);
 
                 // Update live status
-                UpdateLiveStatus(throttleMode, payload);
+                UpdateLiveStatus(throttleMode, payload, phase, steerDegrees);
             }
             catch (OperationCanceledException)
             {
@@ -309,13 +332,26 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
         }
     }
 
-    private void UpdateLiveStatus(ThrottleMode mode, TelemetryPayload payload)
+    private static GameSessionPhase DeterminePhase(in SPageFileGraphic graphics)
+    {
+        if (graphics.Status == 0) return GameSessionPhase.InLobbyOrMenu;
+        if (graphics.IsSetupMenuVisible == 1) return GameSessionPhase.InGarageSetup;
+        if (graphics.IsInPitLane == 1) return GameSessionPhase.InPitLane;
+        if (graphics.Status == 2) return GameSessionPhase.LiveOnTrack;
+        if (graphics.Status == 3) return GameSessionPhase.SessionPaused;
+        if (graphics.Status == 1) return GameSessionPhase.Replay;
+        return GameSessionPhase.InLobbyOrMenu;
+    }
+
+    private void UpdateLiveStatus(ThrottleMode mode, TelemetryPayload payload, GameSessionPhase phase, float steerDegrees)
     {
         var stats = _throttlePolicy.GetStatistics();
         UpdateStatus(s =>
         {
             s.State = mode == ThrottleMode.ThrottledPitLane ? AgentState.RunningThrottled : AgentState.RunningLive;
             s.GameLink = _config.DataSource == DataSourceType.LiveMemory ? GameLinkState.Connected : GameLinkState.MockEmulation;
+            s.SessionPhase = phase;
+            s.SteerAngleDegrees = steerDegrees;
             s.CurrentHz = _effectiveHz;
             s.TotalPacketsCaptured = _capturedTotal;
             s.TotalPacketsSent = _sentTotal;
@@ -323,20 +359,27 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
             s.BandwidthSavingsPercentage = stats.SavingsPercentage;
             s.CurrentCarModel = payload.CarModel;
             s.CurrentTrack = payload.Track;
+            s.SetupsWatchDirectory = _setupWatcher.WatchDirectory;
         });
     }
 
-    private void UpdateThrottledStatus(ThrottleMode mode, in SPageFileGraphic graphics)
+    private void UpdateThrottledStatus(ThrottleMode mode, in SPageFileGraphic graphics, GameSessionPhase phase, string car, string trk, float steerDegrees)
     {
         var stats = _throttlePolicy.GetStatistics();
         UpdateStatus(s =>
         {
             s.State = mode == ThrottleMode.StandbyHeartbeat ? AgentState.StandbyHeartbeat : AgentState.RunningThrottled;
+            s.GameLink = _config.DataSource == DataSourceType.LiveMemory ? GameLinkState.Connected : GameLinkState.MockEmulation;
+            s.SessionPhase = phase;
+            s.SteerAngleDegrees = steerDegrees;
             s.CurrentHz = _effectiveHz;
             s.TotalPacketsCaptured = _capturedTotal;
             s.TotalPacketsSent = _sentTotal;
             s.TotalPacketsDropped = _droppedTotal;
             s.BandwidthSavingsPercentage = stats.SavingsPercentage;
+            if (!string.IsNullOrEmpty(car)) s.CurrentCarModel = car;
+            if (!string.IsNullOrEmpty(trk)) s.CurrentTrack = trk;
+            s.SetupsWatchDirectory = _setupWatcher.WatchDirectory;
         });
     }
 

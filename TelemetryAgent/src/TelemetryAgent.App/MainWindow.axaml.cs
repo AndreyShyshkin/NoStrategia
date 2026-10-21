@@ -41,6 +41,11 @@ public partial class MainWindow : Window
         Activate();
     }
 
+    private async void OnRefreshSetupsClicked(object? sender, RoutedEventArgs e)
+    {
+        await _vm.RefreshSetupsAsync();
+    }
+
     private void OnMinimizeToTrayClicked(object? sender, RoutedEventArgs e)
     {
         Hide();
