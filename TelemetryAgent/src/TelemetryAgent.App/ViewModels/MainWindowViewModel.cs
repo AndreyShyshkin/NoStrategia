@@ -52,9 +52,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private string _tyrePressuresText = "FL: -- | FR: -- | RL: -- | RR: --";
     private string _tyreTempsText = "Tyre Temps: -- °C";
 
+    // Mode indicator (Dev vs Production)
+#if PROD_MODE
+    public bool IsDevMode => false;
+    public string BuildFlavorText => "PRODUCTION BUILD";
+#else
+    public bool IsDevMode => true;
+    public string BuildFlavorText => "DEV / MOCK BUILD";
+#endif
+
     // Controls & Settings
-    private bool _isMockMode = true; // Default to Mock for instant out-of-the-box demo!
+#if PROD_MODE
+    private bool _isMockMode = false;
+    private bool _isLiveMode = true;
+#else
+    private bool _isMockMode = true;
     private bool _isLiveMode = false;
+#endif
     private bool _isRecording = false;
     private string _recordButtonText = "⏺ Record NDJSON";
     private bool _isSettingsOpen = false;
@@ -116,15 +130,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public MainWindowViewModel()
     {
+#if PROD_MODE
         var config = new AgentConfiguration
         {
-            DataSource = DataSourceType.MockEngine, // Starts in autonomous mock mode by default
+            DataSource = DataSourceType.LiveMemory, // Strictly live memory for production
             TargetFrequencyHz = 60,
             EnableAdaptiveThrottling = true,
             IngestionUrl = _ingestionUrl,
             SetupSyncUrl = _setupSyncUrl,
             MinimizeToTrayOnClose = _minimizeToTrayOnClose
         };
+#else
+        var config = new AgentConfiguration
+        {
+            DataSource = DataSourceType.MockEngine, // Starts in mock mode for dev/benchmarking
+            TargetFrequencyHz = 60,
+            EnableAdaptiveThrottling = true,
+            IngestionUrl = _ingestionUrl,
+            SetupSyncUrl = _setupSyncUrl,
+            MinimizeToTrayOnClose = _minimizeToTrayOnClose
+        };
+#endif
 
         _coordinator = new TelemetryAgentCoordinator(config);
         _coordinator.StatusChanged += OnCoordinatorStatusChanged;
@@ -266,6 +292,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     // Command Actions
     public void SwitchToMock()
     {
+        if (!IsDevMode) return;
         IsMockMode = true;
         IsLiveMode = false;
         _coordinator.SwitchDataSource(DataSourceType.MockEngine);
@@ -282,24 +309,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public void InjectLockup()
     {
+        if (!IsDevMode) return;
         _coordinator.AnomalyInjector.InjectAnomaly(AnomalyType.WheelLockup, durationTicks: 90);
         FeedbackMessage = "Injected Front-Left Wheel Lockup (90 ticks)";
     }
 
     public void InjectOversteer()
     {
+        if (!IsDevMode) return;
         _coordinator.AnomalyInjector.InjectAnomaly(AnomalyType.OversteerSpin, durationTicks: 90);
         FeedbackMessage = "Injected Oversteer Spin Anomaly (90 ticks)";
     }
 
     public void InjectFuelAlert()
     {
+        if (!IsDevMode) return;
         _coordinator.AnomalyInjector.InjectAnomaly(AnomalyType.FuelShortage, durationTicks: 120);
         FeedbackMessage = "Injected Fuel Reserve Emergency Alert (1.15L)";
     }
 
     public async Task GenerateTestSetupAsync()
     {
+        if (!IsDevMode) return;
         try
         {
             string targetDir = string.IsNullOrEmpty(SetupsDirectory)

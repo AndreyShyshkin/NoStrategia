@@ -7,6 +7,13 @@
     <AssemblyName>TelemetryAgentClient</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(ProdMode)' == 'true'">
+    <DefineConstants>$(DefineConstants);PROD_MODE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ProdMode)' != 'true'">
+    <DefineConstants>$(DefineConstants);DEV_MODE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>

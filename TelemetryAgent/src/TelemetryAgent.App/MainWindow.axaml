@@ -33,10 +33,13 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Border Background="#1C1E2A" CornerRadius="4" Padding="6,1">
-                                <TextBlock Text="EDGE AGENT v1.0" FontSize="10" Foreground="#8B90A0" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding BuildFlavorText}" FontSize="10" Foreground="#8B90A0" FontWeight="SemiBold" />
                             </Border>
-                            <Border Background="#122B1E" CornerRadius="4" Padding="6,1">
+                            <Border Background="#122B1E" CornerRadius="4" Padding="6,1" IsVisible="{Binding !IsDevMode}">
                                 <TextBlock Text="● SHIELD ACTIVE" FontSize="10" Foreground="#00E676" FontWeight="Bold" />
+                            </Border>
+                            <Border Background="#2B1E12" CornerRadius="4" Padding="6,1" IsVisible="{Binding IsDevMode}">
+                                <TextBlock Text="● DEV BENCHMARK ACTIVE" FontSize="10" Foreground="#FF9100" FontWeight="Bold" />
                             </Border>
                         </StackPanel>
                     </StackPanel>
@@ -212,9 +215,9 @@
                 </Border>
 
                 <!-- ============================================================ -->
-                <!-- CONTROLS & SYNTHETIC ANOMALY INJECTION TOOLBAR               -->
+                <!-- CONTROLS & SYNTHETIC ANOMALY INJECTION TOOLBAR (DEV ONLY)    -->
                 <!-- ============================================================ -->
-                <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="14">
+                <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="14" IsVisible="{Binding IsDevMode}">
                     <StackPanel Spacing="10">
                         <Grid ColumnDefinitions="Auto,*,Auto">
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
@@ -252,6 +255,20 @@
                             </StackPanel>
                         </Grid>
                     </StackPanel>
+                </Border>
+
+                <!-- PRODUCTION TELEMETRY PIPE STATUS (PRODUCTION ONLY) -->
+                <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="14" IsVisible="{Binding !IsDevMode}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock Text="🛡️" FontSize="14" VerticalAlignment="Center" />
+                            <TextBlock Text="OPERATIONAL MODE: LIVE ASSETTO CORSA COMPETIZIONE IPC (UNMANAGED SHARED MEMORY)"
+                                       FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Border Grid.Column="1" Background="#122B1E" CornerRadius="6" Padding="10,4">
+                            <TextBlock Text="PRODUCTION TARGET (WIN-X64)" FontSize="10" FontWeight="Bold" Foreground="#00E676" />
+                        </Border>
+                    </Grid>
                 </Border>
 
             </StackPanel>
