@@ -45,11 +45,14 @@ class Program
 
         bool isWine = IsRunningUnderWine();
         bool forceGpu = args.Any(a => a.Equals("--gpu", StringComparison.OrdinalIgnoreCase));
+        bool forceSoftware = args.Any(a => a.Equals("--software", StringComparison.OrdinalIgnoreCase) ||
+                                          a.Equals("--software-render", StringComparison.OrdinalIgnoreCase))
+                             || Environment.GetEnvironmentVariable("AVALONIA_SOFTWARE") == "1";
 
-        // Under Wine / Proton / FEX-Emu / DXMT / Apple Silicon: ALWAYS default to GDI Software Rasterizer.
-        // This is 100% immune to DXVK, DXMT, ANGLE, Metal, and FEX translation deadlocks.
-        // GPU rendering can be enabled explicitly with --gpu.
-        bool useSoftware = !forceGpu;
+        // Under Wine / Proton 10/11: default to GDI Software Rasterizer with RedirectionSurface
+        // for instant startup and zero graphics driver friction.
+        // On native Windows 10/11: default to hardware ANGLE with automatic software fallback.
+        bool useSoftware = forceSoftware || (isWine && !forceGpu);
 
         try
         {
@@ -90,7 +93,7 @@ class Program
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINESERVER")) ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PROTON_VERSION")) ||
             !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("STEAM_COMPAT_DATA_PATH")) ||
-            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FEX_APP_CONFIG")))
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("STEAM_COMPAT_CLIENT_INSTALL_PATH")))
         {
             return true;
         }
@@ -112,10 +115,8 @@ class Program
         return false;
     }
 
-    public static AppBuilder BuildAvaloniaApp(bool forceSoftware = true)
+    public static AppBuilder BuildAvaloniaApp(bool forceSoftware = false)
     {
-        // When forceSoftware is true, use purely Win32 GDI Software rendering.
-        // This is 100% immune to DXVK, DXMT, ANGLE, Metal, and FEX translation deadlocks.
         var renderingModes = forceSoftware
             ? new[] { Win32RenderingMode.Software }
             : new[]
@@ -129,9 +130,9 @@ class Program
             ? new[] { Win32CompositionMode.RedirectionSurface }
             : new[]
             {
-                Win32CompositionMode.RedirectionSurface,
+                Win32CompositionMode.WinUIComposition,
                 Win32CompositionMode.LowLatencyDxgiSwapChain,
-                Win32CompositionMode.WinUIComposition
+                Win32CompositionMode.RedirectionSurface
             };
 
         return AppBuilder.Configure<App>()
