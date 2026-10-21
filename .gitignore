@@ -232,3 +232,8 @@ temp/
 scratch/
 *.bak
 *.orig
+
+# Release packages
+release_packages/
+*.zip
+
