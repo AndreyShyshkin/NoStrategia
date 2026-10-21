@@ -130,6 +130,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public MainWindowViewModel()
     {
+        if (Program.IsRunningUnderWine())
+        {
+            _minimizeToTrayOnClose = false;
+        }
+
 #if PROD_MODE
         var config = new AgentConfiguration
         {

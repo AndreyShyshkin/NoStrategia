@@ -25,8 +25,12 @@ public partial class App : Application
             _mainWindow.Show();
             _mainWindow.Activate();
 
-            // Initialize tray icon asynchronously so missing Wine explorer/systray doesn't block window render
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => SetupTrayIcon(_mainWindow, desktop));
+            // Under Wine / Proton / FEX, desktop environments typically do not have a standard explorer.exe systray.
+            // Shell_NotifyIconW in Wine can block or produce warnings. Only initialize tray on native Windows.
+            if (!Program.IsRunningUnderWine())
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => SetupTrayIcon(_mainWindow, desktop));
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

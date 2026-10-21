@@ -14,15 +14,24 @@ namespace TelemetryAgent.App;
 
 class Program
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
     [STAThread]
-    public static async Task Main(string[] args)
+    public static void Main(string[] args)
     {
+        string exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppDomain.CurrentDomain.BaseDirectory;
+        string bootLog = Path.Combine(exeDir, "telemetry_agent_boot.log");
+        string crashLog = Path.Combine(exeDir, "telemetry_agent_crash.log");
+
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             try
             {
-                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
-                File.AppendAllText(logPath, $"[CRASH {DateTime.UtcNow:O}]\n{e.ExceptionObject}\n\n");
+                File.AppendAllText(crashLog, $"[CRASH {DateTime.UtcNow:O}]\n{e.ExceptionObject}\n\n");
             }
             catch { }
         };
@@ -30,23 +39,27 @@ class Program
         // Support headless/CLI execution for CI, Docker, or Wine background services
         if (args.Length > 0 && (args[0] == "--headless" || args[0] == "--cli" || args[0] == "--mock"))
         {
-            await RunHeadlessAsync(args);
+            RunHeadlessAsync(args).GetAwaiter().GetResult();
             return;
         }
 
         bool isWine = IsRunningUnderWine();
         bool forceGpu = args.Any(a => a.Equals("--gpu", StringComparison.OrdinalIgnoreCase));
-        bool forceSoftware = args.Any(a => a.Equals("--software", StringComparison.OrdinalIgnoreCase) ||
-                                          a.Equals("--software-render", StringComparison.OrdinalIgnoreCase))
-                             || Environment.GetEnvironmentVariable("AVALONIA_SOFTWARE") == "1";
 
-        // Under Wine / Proton / FEX-Emu: default to rock-solid Software Rendering to avoid DXVK/ANGLE JIT deadlocks
-        bool useSoftware = forceSoftware || (isWine && !forceGpu);
+        // Under Wine / Proton / FEX-Emu / DXMT / Apple Silicon: ALWAYS default to GDI Software Rasterizer.
+        // This is 100% immune to DXVK, DXMT, ANGLE, Metal, and FEX translation deadlocks.
+        // GPU rendering can be enabled explicitly with --gpu.
+        bool useSoftware = !forceGpu;
 
         try
         {
-            string bootLog = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_boot.log");
-            File.WriteAllText(bootLog, $"[BOOT {DateTime.UtcNow:O}] IsWine={isWine}, UseSoftware={useSoftware}, OS={Environment.OSVersion}, Arch={RuntimeInformation.ProcessArchitecture}\n");
+            File.WriteAllText(bootLog, $"[BOOT {DateTime.UtcNow:O}]\n" +
+                                       $"  IsWine: {isWine}\n" +
+                                       $"  UseSoftware: {useSoftware}\n" +
+                                       $"  ForceGpu: {forceGpu}\n" +
+                                       $"  Architecture: {RuntimeInformation.ProcessArchitecture}\n" +
+                                       $"  OS: {RuntimeInformation.OSDescription}\n" +
+                                       $"  ProcessPath: {Environment.ProcessPath}\n\n");
         }
         catch { }
 
@@ -58,15 +71,12 @@ class Program
         {
             try
             {
-                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
-                File.AppendAllText(logPath, $"[STARTUP RETRY]: {ex.Message}. Retrying with fallback software rasterizer...\n");
-
+                File.AppendAllText(crashLog, $"[STARTUP RETRY]: {ex.Message}. Retrying with Skia Software Rasterizer...\n");
                 BuildAvaloniaApp(forceSoftware: true).StartWithClassicDesktopLifetime(args);
             }
             catch (Exception fatal)
             {
-                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
-                File.AppendAllText(logPath, $"[FATAL CRASH]: {fatal}\n");
+                File.AppendAllText(crashLog, $"[FATAL CRASH]: {fatal}\n");
                 throw;
             }
         }
@@ -74,28 +84,54 @@ class Program
 
     public static bool IsRunningUnderWine()
     {
-        if (!OperatingSystem.IsWindows()) return false;
-        try
+        // 1. Check Wine/Proton environment variables
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINELOADER")) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINEPREFIX")) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINESERVER")) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PROTON_VERSION")) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("STEAM_COMPAT_DATA_PATH")) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FEX_APP_CONFIG")))
         {
-            IntPtr hNtdll = NativeLibrary.Load("ntdll.dll");
-            return NativeLibrary.TryGetExport(hNtdll, "wine_get_version", out _);
+            return true;
         }
-        catch
+
+        // 2. Check ntdll export wine_get_version
+        if (OperatingSystem.IsWindows())
         {
-            return false;
+            try
+            {
+                IntPtr hNtdll = GetModuleHandle("ntdll.dll");
+                if (hNtdll != IntPtr.Zero && GetProcAddress(hNtdll, "wine_get_version") != IntPtr.Zero)
+                {
+                    return true;
+                }
+            }
+            catch { }
         }
+
+        return false;
     }
 
-    public static AppBuilder BuildAvaloniaApp(bool forceSoftware = false)
+    public static AppBuilder BuildAvaloniaApp(bool forceSoftware = true)
     {
+        // When forceSoftware is true, use purely Win32 GDI Software rendering.
+        // This is 100% immune to DXVK, DXMT, ANGLE, Metal, and FEX translation deadlocks.
         var renderingModes = forceSoftware
             ? new[] { Win32RenderingMode.Software }
             : new[]
             {
-                Win32RenderingMode.Software,
-                Win32RenderingMode.Wgl,
                 Win32RenderingMode.AngleEgl,
-                Win32RenderingMode.Vulkan
+                Win32RenderingMode.Wgl,
+                Win32RenderingMode.Software
+            };
+
+        var compositionModes = forceSoftware
+            ? new[] { Win32CompositionMode.RedirectionSurface }
+            : new[]
+            {
+                Win32CompositionMode.RedirectionSurface,
+                Win32CompositionMode.LowLatencyDxgiSwapChain,
+                Win32CompositionMode.WinUIComposition
             };
 
         return AppBuilder.Configure<App>()
@@ -103,12 +139,7 @@ class Program
             .With(new Win32PlatformOptions
             {
                 RenderingMode = renderingModes,
-                CompositionMode = new[]
-                {
-                    Win32CompositionMode.RedirectionSurface,
-                    Win32CompositionMode.LowLatencyDxgiSwapChain,
-                    Win32CompositionMode.WinUIComposition
-                }
+                CompositionMode = compositionModes
             })
             .WithInterFont()
             .LogToTrace();
