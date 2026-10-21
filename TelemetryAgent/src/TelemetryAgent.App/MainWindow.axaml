@@ -1,0 +1,327 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:TelemetryAgent.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="920" d:DesignHeight="700"
+        x:Class="TelemetryAgent.App.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="NoStrategia Telemetry Agent"
+        Width="920" Height="700"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        Background="#0D0E12"
+        Foreground="#F0F2F8"
+        FontFamily="Inter, Segoe UI, -apple-system, Roboto, sans-serif">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <!-- ============================================================ -->
+        <!-- TOP NAVIGATION & STATUS HEADER                               -->
+        <!-- ============================================================ -->
+        <Border Grid.Row="0" Background="#13141B" BorderBrush="#FF5500" BorderThickness="0,0,0,2" Padding="20,14">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <!-- Branding & Shield Badge -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Width="34" Height="34" CornerRadius="8" Background="#FF5500">
+                        <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="NOSTRATEGIA" FontWeight="Black" FontSize="16" Foreground="#FFFFFF" LetterSpacing="0.8" />
+                            <TextBlock Text="TELEMETRY" FontWeight="Bold" FontSize="16" Foreground="#FF5500" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Background="#1C1E2A" CornerRadius="4" Padding="6,1">
+                                <TextBlock Text="EDGE AGENT v1.0" FontSize="10" Foreground="#8B90A0" FontWeight="SemiBold" />
+                            </Border>
+                            <Border Background="#122B1E" CornerRadius="4" Padding="6,1">
+                                <TextBlock Text="● SHIELD ACTIVE" FontSize="10" Foreground="#00E676" FontWeight="Bold" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Header Actions -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="⚙ Settings" Click="OnSettingsClicked" Background="#1C1E2A" Foreground="#E0E2EC"
+                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12" />
+                    <Button Content="🗕 Tray" Click="OnMinimizeToTrayClicked" Background="#1C1E2A" Foreground="#E0E2EC"
+                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ============================================================ -->
+        <!-- MAIN DASHBOARD CONTENT                                       -->
+        <!-- ============================================================ -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="16" Margin="20,16,20,16">
+
+                <!-- 4 MAIN STATUS CARDS (GRID 2x2) -->
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+
+                    <!-- CARD 1: AGENT TELEMETRY PIPELINE -->
+                    <Border Grid.Row="0" Grid.Column="0" Margin="0,0,8,8" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="⚡" FontSize="14" Foreground="#FF5500" />
+                                    <TextBlock Text="AGENT STATUS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{Binding AgentStatusColor}" CornerRadius="12" Padding="10,3">
+                                    <TextBlock Text="{Binding AgentStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
+                                </Border>
+                            </Grid>
+                            <TextBlock Text="{Binding AgentDetails}" FontSize="13" Foreground="#FFFFFF" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <Border Background="#1C1E2C" CornerRadius="6" Padding="10,6">
+                                <Grid ColumnDefinitions="*,*">
+                                    <TextBlock Grid.Column="0" Text="{Binding EffectiveHzText}" FontWeight="Bold" FontSize="13" Foreground="#00E676" />
+                                    <TextBlock Grid.Column="1" Text="{Binding SavingsText}" HorizontalAlignment="Right" FontSize="11" Foreground="#FF9100" FontWeight="SemiBold" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- CARD 2: GAME LINK (ASSETTO CORSA COMPETIZIONE) -->
+                    <Border Grid.Row="0" Grid.Column="1" Margin="8,0,0,8" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🎮" FontSize="14" Foreground="#00E5FF" />
+                                    <TextBlock Text="GAME PROCESS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{Binding GameStatusColor}" CornerRadius="12" Padding="10,3">
+                                    <TextBlock Text="{Binding GameStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
+                                </Border>
+                            </Grid>
+                            <TextBlock Text="{Binding CarAndTrackText}" FontSize="13" Foreground="#FFFFFF" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <Border Background="#1C1E2C" CornerRadius="6" Padding="10,6">
+                                <TextBlock Text="{Binding GameDetails}" FontSize="11" Foreground="#8B90A0" TextTrimming="CharacterEllipsis" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- CARD 3: INGESTION GATEWAY LINK -->
+                    <Border Grid.Row="1" Grid.Column="0" Margin="0,8,8,0" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🌐" FontSize="14" Foreground="#2979FF" />
+                                    <TextBlock Text="BACKEND SERVER" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="{Binding ServerStatusColor}" CornerRadius="12" Padding="10,3">
+                                    <TextBlock Text="{Binding ServerStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
+                                </Border>
+                            </Grid>
+                            <TextBlock Text="{Binding ServerDetails}" FontSize="13" Foreground="#FFFFFF" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <Border Background="#1C1E2C" CornerRadius="6" Padding="10,6">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <TextBlock Grid.Column="0" Text="{Binding ServerPingText}" FontSize="11" Foreground="#00E676" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PacketsCounterText}" HorizontalAlignment="Right" FontSize="11" Foreground="#8B90A0" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- CARD 4: SETUP WATCHER & SHA-256 -->
+                    <Border Grid.Row="1" Grid.Column="1" Margin="8,8,0,0" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="📁" FontSize="14" Foreground="#FFD600" />
+                                    <TextBlock Text="SETUP INTERCEPTOR" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Background="#122B1E" CornerRadius="12" Padding="10,3">
+                                    <TextBlock Text="ACTIVE" FontSize="11" FontWeight="Bold" Foreground="#00E676" />
+                                </Border>
+                            </Grid>
+                            <TextBlock Text="{Binding LastSetupSynced}" FontSize="13" Foreground="#FFFFFF" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <Border Background="#1C1E2C" CornerRadius="6" Padding="10,6">
+                                <TextBlock Text="{Binding LastSetupHash}" FontSize="11" Foreground="#8B90A0" TextTrimming="CharacterEllipsis" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                </Grid>
+
+                <!-- ============================================================ -->
+                <!-- LIVE TELEMETRY MINI-HUD                                      -->
+                <!-- ============================================================ -->
+                <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="18">
+                    <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <TextBlock Grid.Column="0" Text="LIVE TELEMETRY TELEMETRICS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                            <TextBlock Grid.Column="2" Text="{Binding SectorText}" FontSize="12" Foreground="#00E5FF" FontWeight="Bold" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="140,*,200">
+                            <!-- Speed & Gear Display -->
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Text="{Binding SpeedText}" FontSize="42" FontWeight="Black" Foreground="#FFFFFF" />
+                                    <TextBlock Text="km/h" FontSize="13" Foreground="#8B90A0" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Border Background="#FF5500" CornerRadius="6" Padding="10,2">
+                                        <TextBlock Text="{Binding GearText}" FontSize="16" FontWeight="Black" Foreground="#FFFFFF" />
+                                    </Border>
+                                    <TextBlock Text="GEAR" FontSize="11" Foreground="#8B90A0" VerticalAlignment="Center" FontWeight="Bold" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- RPM Gauge & Pedals -->
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="8" Margin="10,0">
+                                <!-- RPM -->
+                                <StackPanel Spacing="3">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0" Text="ENGINE REVS" FontSize="10" Foreground="#8B90A0" FontWeight="Bold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding RpmText}" FontSize="11" Foreground="#FF9100" FontWeight="Bold" />
+                                    </Grid>
+                                    <ProgressBar Height="10" Minimum="0" Maximum="1" Value="{Binding RpmProgress}"
+                                                 Background="#232638" Foreground="#FF5500" CornerRadius="5" />
+                                </StackPanel>
+                                <!-- Throttle & Brake Pedals -->
+                                <Grid ColumnDefinitions="*,*">
+                                    <!-- Gas -->
+                                    <StackPanel Grid.Column="0" Margin="0,0,6,0" Spacing="3">
+                                        <TextBlock Text="THROTTLE" FontSize="10" Foreground="#8B90A0" FontWeight="Bold" />
+                                        <ProgressBar Height="8" Minimum="0" Maximum="1" Value="{Binding ThrottleProgress}"
+                                                     Background="#232638" Foreground="#00E676" CornerRadius="4" />
+                                    </StackPanel>
+                                    <!-- Brake -->
+                                    <StackPanel Grid.Column="1" Margin="6,0,0,0" Spacing="3">
+                                        <TextBlock Text="BRAKE" FontSize="10" Foreground="#8B90A0" FontWeight="Bold" />
+                                        <ProgressBar Height="8" Minimum="0" Maximum="1" Value="{Binding BrakeProgress}"
+                                                     Background="#232638" Foreground="#FF1744" CornerRadius="4" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- Lap Timing & Tyres -->
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="6" HorizontalAlignment="Right">
+                                <StackPanel HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock Text="LAP TIME" FontSize="10" Foreground="#8B90A0" FontWeight="Bold" HorizontalAlignment="Right" />
+                                    <TextBlock Text="{Binding LapTimeText}" FontSize="20" FontWeight="Black" Foreground="#00E676" HorizontalAlignment="Right" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding TyrePressuresText}" FontSize="10" Foreground="#8B90A0" HorizontalAlignment="Right" />
+                                <TextBlock Text="{Binding TyreTempsText}" FontSize="10" Foreground="#00E5FF" HorizontalAlignment="Right" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ============================================================ -->
+                <!-- CONTROLS & SYNTHETIC ANOMALY INJECTION TOOLBAR               -->
+                <!-- ============================================================ -->
+                <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="14">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="DATA SOURCE:" FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" />
+                                <Button Content="🎮 Live ACC (Wine/Win32)" Click="OnSwitchToLiveClicked"
+                                        Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,5" FontSize="11" FontWeight="SemiBold" />
+                                <Button Content="🧪 Mock GT3 Simulator" Click="OnSwitchToMockClicked"
+                                        Background="#FF5500" Foreground="#FFFFFF" BorderBrush="#FF5500" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,5" FontSize="11" FontWeight="Bold" />
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="{Binding RecordButtonText}" Click="OnToggleRecordClicked"
+                                    Background="#261E14" Foreground="#FF9100" BorderBrush="#FF9100" BorderThickness="1"
+                                    CornerRadius="6" Padding="12,5" FontSize="11" FontWeight="Bold" />
+                        </Grid>
+
+                        <Rectangle Height="1" Fill="#232638" />
+
+                        <!-- Anomaly Injections for autonomous testing -->
+                        <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Grid.Column="0" Text="TEST ANOMALIES:" FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <Button Content="⚠ Wheel Lockup" Click="OnInjectLockupClicked"
+                                        Background="#2B161B" Foreground="#FF5252" BorderBrush="#FF1744" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
+                                <Button Content="⟳ Oversteer Spin" Click="OnInjectOversteerClicked"
+                                        Background="#2B2114" Foreground="#FFB74D" BorderBrush="#FF9100" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
+                                <Button Content="⛽ Fuel Critical" Click="OnInjectFuelClicked"
+                                        Background="#231B2B" Foreground="#E040FB" BorderBrush="#D500F9" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
+                                <Button Content="⚙ Test Setup Sync" Click="OnGenerateTestSetupClicked"
+                                        Background="#122B1E" Foreground="#69F0AE" BorderBrush="#00E676" BorderThickness="1"
+                                        CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ============================================================ -->
+        <!-- BOTTOM STATUS BAR                                            -->
+        <!-- ============================================================ -->
+        <Border Grid.Row="2" Background="#13141B" BorderBrush="#20222E" BorderThickness="0,1,0,0" Padding="20,8">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding FeedbackMessage}" FontSize="12" Foreground="#00E676" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="CourseWork Theme #9 • Edge Telemetry Ingestion Agent" FontSize="11" Foreground="#5A5E70" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- ============================================================ -->
+        <!-- SETTINGS MODAL OVERLAY                                       -->
+        <!-- ============================================================ -->
+        <Grid Grid.Row="0" Grid.RowSpan="3" Background="#CC07080B" IsVisible="{Binding IsSettingsOpen}">
+            <Border Width="560" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Background="#161722" BorderBrush="#FF5500" BorderThickness="1" CornerRadius="12" Padding="24">
+                <StackPanel Spacing="16">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="AGENT CONFIGURATION" FontWeight="Black" FontSize="16" Foreground="#FFFFFF" />
+                        <Button Grid.Column="1" Content="✕" Click="OnCloseSettingsClicked" Background="Transparent" Foreground="#8B90A0" FontSize="16" FontWeight="Bold" />
+                    </Grid>
+
+                    <Rectangle Height="1" Fill="#242636" />
+
+                    <!-- Ingestion Endpoint -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Telemetry Ingestion URL:" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding IngestionUrl}" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" Padding="10,6" />
+                    </StackPanel>
+
+                    <!-- Setup Sync Endpoint -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Setup Sync URL:" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding SetupSyncUrl}" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" Padding="10,6" />
+                    </StackPanel>
+
+                    <!-- Frequency & Throttling -->
+                    <Grid ColumnDefinitions="*,*">
+                        <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                            <TextBlock Text="Target Frequency (Hz):" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" />
+                            <NumericUpDown Minimum="10" Maximum="100" Value="{Binding TargetFrequencyHz}" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0" VerticalAlignment="Center">
+                            <CheckBox Content="Adaptive Throttling (Pit/Pause)" IsChecked="{Binding EnableAdaptiveThrottling}" Foreground="#FFFFFF" FontWeight="SemiBold" />
+                            <CheckBox Content="Minimize to Tray on Close" IsChecked="{Binding MinimizeToTrayOnClose}" Foreground="#FFFFFF" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Setups Path -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Custom Setups Directory (empty = default Documents/ACC/Setups):" FontSize="12" Foreground="#8B90A0" FontWeight="SemiBold" />
+                        <TextBox Text="{Binding SetupsDirectory}" Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" CornerRadius="6" Padding="10,6" />
+                    </StackPanel>
+
+                    <Rectangle Height="1" Fill="#242636" />
+
+                    <!-- Save Button -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Button Grid.Column="1" Content="Save &amp; Apply" Click="OnSaveSettingsClicked"
+                                Background="#FF5500" Foreground="#FFFFFF" CornerRadius="6" Padding="20,8" FontWeight="Bold" FontSize="13" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+    </Grid>
+
+</Window>

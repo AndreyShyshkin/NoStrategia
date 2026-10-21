@@ -1,0 +1,105 @@
+{
+  "carName": "amg_gt3_evo",
+  "basicSetup": {
+    "tyres": {
+      "tyreCompound": 0,
+      "tyrePressure": [
+        58,
+        60,
+        56,
+        58
+      ]
+    },
+    "alignment": {
+      "camber": [
+        34,
+        34,
+        28,
+        28
+      ],
+      "toe": [
+        12,
+        12,
+        18,
+        18
+      ]
+    },
+    "electronics": {
+      "tC1": 3,
+      "tC2": 4,
+      "abs": 3,
+      "eCUMap": 1
+    },
+    "strategy": {
+      "fuel": 62,
+      "tyreSet": 1,
+      "pitStrategy": [
+        {
+          "fuelToAdd": 45,
+          "tyres": {
+            "tyreCompound": 0,
+            "tyrePressure": [
+              59,
+              61,
+              57,
+              59
+            ]
+          },
+          "tyreSet": 2
+        }
+      ]
+    }
+  },
+  "advancedSetup": {
+    "mechanicalBalance": {
+      "aRBFront": 4,
+      "aRBRear": 2,
+      "wheelRate": [
+        14,
+        14,
+        11,
+        11
+      ]
+    },
+    "dampers": {
+      "bumpSlow": [
+        10,
+        10,
+        8,
+        8
+      ],
+      "bumpFast": [
+        15,
+        15,
+        12,
+        12
+      ],
+      "reboundSlow": [
+        12,
+        12,
+        10,
+        10
+      ],
+      "reboundFast": [
+        18,
+        18,
+        14,
+        14
+      ]
+    },
+    "aeroBalance": {
+      "rideHeight": [
+        14,
+        28
+      ],
+      "rearWing": 8,
+      "brakeDuct": [
+        3,
+        2
+      ]
+    },
+    "drivetrain": {
+      "preload": 6
+    }
+  }
+}
