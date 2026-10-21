@@ -61,4 +61,6 @@ public sealed class AgentStatus
 
     public double LastServerLatencyMs { get; set; }
     public string LastError { get; set; } = string.Empty;
+
+    public AgentStatus Clone() => (AgentStatus)MemberwiseClone();
 }

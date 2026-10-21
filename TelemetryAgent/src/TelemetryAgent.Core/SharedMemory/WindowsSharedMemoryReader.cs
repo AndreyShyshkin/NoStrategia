@@ -20,6 +20,10 @@ public sealed class WindowsSharedMemoryReader : ITelemetryReader
     private MemoryMappedFile? _staticMmf;
     private MemoryMappedViewAccessor? _staticAccessor;
 
+    private readonly byte[] _physicsBuffer = new byte[Marshal.SizeOf<SPageFilePhysics>()];
+    private readonly byte[] _graphicsBuffer = new byte[Marshal.SizeOf<SPageFileGraphic>()];
+    private readonly byte[] _staticBuffer = new byte[Marshal.SizeOf<SPageFileStatic>()];
+
     private bool _isConnected;
     private readonly object _syncLock = new();
 
@@ -86,94 +90,109 @@ public sealed class WindowsSharedMemoryReader : ITelemetryReader
         }
     }
 
-    public unsafe bool TryReadPhysics(out SPageFilePhysics physics)
+    public bool TryReadPhysics(out SPageFilePhysics physics)
     {
         physics = default;
         if (!_isConnected || _physicsAccessor == null) return false;
 
         try
         {
-            byte* pointer = null;
-            _physicsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+            int structSize = _physicsBuffer.Length;
+            int bytesToRead = (int)Math.Min(_physicsAccessor.Capacity, structSize);
+            if (bytesToRead <= 0) return false;
+
+            _physicsAccessor.ReadArray(0, _physicsBuffer, 0, bytesToRead);
+            if (bytesToRead < structSize)
+            {
+                Array.Clear(_physicsBuffer, bytesToRead, structSize - bytesToRead);
+            }
+
+            var handle = GCHandle.Alloc(_physicsBuffer, GCHandleType.Pinned);
             try
             {
-                if (pointer != null)
-                {
-                    physics = Marshal.PtrToStructure<SPageFilePhysics>((IntPtr)pointer);
-                    return true;
-                }
+                physics = Marshal.PtrToStructure<SPageFilePhysics>(handle.AddrOfPinnedObject());
+                return true;
             }
             finally
             {
-                _physicsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                handle.Free();
             }
         }
         catch
         {
             _isConnected = false;
+            return false;
         }
-
-        return false;
     }
 
-    public unsafe bool TryReadGraphics(out SPageFileGraphic graphics)
+    public bool TryReadGraphics(out SPageFileGraphic graphics)
     {
         graphics = default;
         if (!_isConnected || _graphicsAccessor == null) return false;
 
         try
         {
-            byte* pointer = null;
-            _graphicsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+            int structSize = _graphicsBuffer.Length;
+            int bytesToRead = (int)Math.Min(_graphicsAccessor.Capacity, structSize);
+            if (bytesToRead <= 0) return false;
+
+            _graphicsAccessor.ReadArray(0, _graphicsBuffer, 0, bytesToRead);
+            if (bytesToRead < structSize)
+            {
+                Array.Clear(_graphicsBuffer, bytesToRead, structSize - bytesToRead);
+            }
+
+            var handle = GCHandle.Alloc(_graphicsBuffer, GCHandleType.Pinned);
             try
             {
-                if (pointer != null)
-                {
-                    graphics = Marshal.PtrToStructure<SPageFileGraphic>((IntPtr)pointer);
-                    return true;
-                }
+                graphics = Marshal.PtrToStructure<SPageFileGraphic>(handle.AddrOfPinnedObject());
+                return true;
             }
             finally
             {
-                _graphicsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                handle.Free();
             }
         }
         catch
         {
             _isConnected = false;
+            return false;
         }
-
-        return false;
     }
 
-    public unsafe bool TryReadStatic(out SPageFileStatic staticData)
+    public bool TryReadStatic(out SPageFileStatic staticData)
     {
         staticData = default;
         if (!_isConnected || _staticAccessor == null) return false;
 
         try
         {
-            byte* pointer = null;
-            _staticAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+            int structSize = _staticBuffer.Length;
+            int bytesToRead = (int)Math.Min(_staticAccessor.Capacity, structSize);
+            if (bytesToRead <= 0) return false;
+
+            _staticAccessor.ReadArray(0, _staticBuffer, 0, bytesToRead);
+            if (bytesToRead < structSize)
+            {
+                Array.Clear(_staticBuffer, bytesToRead, structSize - bytesToRead);
+            }
+
+            var handle = GCHandle.Alloc(_staticBuffer, GCHandleType.Pinned);
             try
             {
-                if (pointer != null)
-                {
-                    staticData = Marshal.PtrToStructure<SPageFileStatic>((IntPtr)pointer);
-                    return true;
-                }
+                staticData = Marshal.PtrToStructure<SPageFileStatic>(handle.AddrOfPinnedObject());
+                return true;
             }
             finally
             {
-                _staticAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                handle.Free();
             }
         }
         catch
         {
             // Non-critical, static can be missing on initial boot
+            return false;
         }
-
-        return false;
     }
 
     public void Disconnect()

@@ -13,6 +13,7 @@ namespace TelemetryAgent.Core.Setups;
 public sealed class SetupWatcherService : ISetupWatcher
 {
     private FileSystemWatcher? _watcher;
+    private Timer? _pollTimer;
     private string _watchDirectory;
     private readonly Dictionary<string, string> _fileHashes = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
@@ -35,35 +36,18 @@ public sealed class SetupWatcherService : ISetupWatcher
 
     /// <summary>
     /// Intelligent auto-discovery of ACC Setups folder across Windows and Wine/Proton/CrossOver bottles.
-    /// Prioritizes directories containing existing setup files (e.g. bentley_continental_gt3_2018/Spa/Active.json).
+    /// Prioritizes local container drives (C:\) over virtual host mappings (Z:\) and ranks folders
+    /// by the newest LastWriteTime of active setup files (e.g. bentley_continental_gt3_2018/Spa/Active.json).
     /// </summary>
     public static string FindAccSetupsDirectory()
     {
         var candidates = new List<string>();
 
-        // 1. Standard Windows Documents
-        try
-        {
-            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            if (!string.IsNullOrWhiteSpace(docs))
-                candidates.Add(Path.Combine(docs, "Assetto Corsa Competizione", "Setups"));
-        }
-        catch { }
-
-        // 2. User Profile Documents
-        try
-        {
-            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (!string.IsNullOrWhiteSpace(userProfile))
-                candidates.Add(Path.Combine(userProfile, "Documents", "Assetto Corsa Competizione", "Setups"));
-        }
-        catch { }
-
-        // 3. Proton / Steam default user paths (e.g. C:\users\steamuser\Documents)
+        // 1. Primary candidate in Wine/Proton containers: C:\users\steamuser\Documents
         string[] commonUsers = ["steamuser", "crossover", "wineuser", "default", "Public"];
-        string[] rootDrives = ["C:\\", "D:\\", "Z:\\"];
+        string[] localDrives = ["C:\\", "D:\\", "E:\\"];
 
-        foreach (var drive in rootDrives)
+        foreach (var drive in localDrives)
         {
             string usersDir = Path.Combine(drive, "users");
             if (Directory.Exists(usersDir))
@@ -85,12 +69,46 @@ public sealed class SetupWatcherService : ISetupWatcher
             }
         }
 
-        // Rank candidates: pick the first one that exists and contains .json setup files
-        string? bestCandidateWithFiles = null;
-        string? firstExisting = null;
-        int maxFilesFound = 0;
+        // 2. Standard Windows Documents via Environment APIs
+        try
+        {
+            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (!string.IsNullOrWhiteSpace(docs))
+                candidates.Add(Path.Combine(docs, "Assetto Corsa Competizione", "Setups"));
+        }
+        catch { }
 
-        foreach (var path in candidates)
+        try
+        {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(userProfile))
+                candidates.Add(Path.Combine(userProfile, "Documents", "Assetto Corsa Competizione", "Setups"));
+        }
+        catch { }
+
+        // 3. Fallback host drive Z:\ (Wine root mapping to macOS host)
+        string zUsers = Path.Combine("Z:\\", "users");
+        if (Directory.Exists(zUsers))
+        {
+            try
+            {
+                foreach (var userDir in Directory.GetDirectories(zUsers))
+                {
+                    candidates.Add(Path.Combine(userDir, "Documents", "Assetto Corsa Competizione", "Setups"));
+                }
+            }
+            catch { }
+        }
+
+        // Rank candidates:
+        // Priority 1: Has Active.json or .json files with the most recent modification timestamp
+        // Priority 2: Located on C:\ (inside the Wine bottle) rather than Z:\ (host)
+        string? bestCandidate = null;
+        DateTime bestTimestampUtc = DateTime.MinValue;
+        bool bestHasActive = false;
+        string? firstExisting = null;
+
+        foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (string.IsNullOrWhiteSpace(path)) continue;
 
@@ -99,26 +117,38 @@ public sealed class SetupWatcherService : ISetupWatcher
                 if (Directory.Exists(path))
                 {
                     firstExisting ??= path;
-                    int jsonCount = Directory.GetFiles(path, "*.json", SearchOption.AllDirectories).Length;
-                    if (jsonCount > maxFilesFound)
+
+                    var files = new DirectoryInfo(path).GetFiles("*.json", SearchOption.AllDirectories);
+                    if (files.Length > 0)
                     {
-                        maxFilesFound = jsonCount;
-                        bestCandidateWithFiles = path;
+                        bool hasActive = files.Any(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
+                        DateTime newest = files.Max(f => f.LastWriteTimeUtc);
+                        bool isCDrive = path.StartsWith("C:", StringComparison.OrdinalIgnoreCase);
+
+                        // If current candidate has Active.json or is newer or is on C: drive
+                        if (bestCandidate == null ||
+                            (hasActive && !bestHasActive) ||
+                            (hasActive == bestHasActive && isCDrive && !bestCandidate.StartsWith("C:", StringComparison.OrdinalIgnoreCase)) ||
+                            (hasActive == bestHasActive && newest > bestTimestampUtc))
+                        {
+                            bestCandidate = path;
+                            bestTimestampUtc = newest;
+                            bestHasActive = hasActive;
+                        }
                     }
                 }
             }
             catch { }
         }
 
-        if (bestCandidateWithFiles != null)
-            return bestCandidateWithFiles;
+        if (bestCandidate != null)
+            return bestCandidate;
 
         if (firstExisting != null)
             return firstExisting;
 
         // Fallback default
-        string defaultDocs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        return Path.Combine(defaultDocs, "Assetto Corsa Competizione", "Setups");
+        return Path.Combine("C:\\", "users", "steamuser", "Documents", "Assetto Corsa Competizione", "Setups");
     }
 
     public void Start()
@@ -151,6 +181,20 @@ public sealed class SetupWatcherService : ISetupWatcher
                 _watcher.Created += OnFileEvent;
                 _isActive = true;
 
+                // Start periodic poll timer (every 3s) for Wine compatibility
+                _pollTimer = new Timer(async _ =>
+                {
+                    try
+                    {
+                        var payload = await ScanExistingSetupsAsync();
+                        if (payload != null)
+                        {
+                            SetupDetected?.Invoke(payload);
+                        }
+                    }
+                    catch { }
+                }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3));
+
                 // Initial scan: immediately discover existing setups (e.g. Active.json)
                 _ = Task.Run(async () =>
                 {
@@ -177,6 +221,12 @@ public sealed class SetupWatcherService : ISetupWatcher
         lock (_lock)
         {
             if (!_isActive) return;
+
+            if (_pollTimer != null)
+            {
+                _pollTimer.Dispose();
+                _pollTimer = null;
+            }
 
             if (_watcher != null)
             {

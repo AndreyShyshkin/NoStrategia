@@ -45,6 +45,10 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
     private double _effectiveHz;
 
     private string _lastQueriedCar = string.Empty;
+    private readonly System.Diagnostics.Stopwatch _statusBroadcastStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    private GameSessionPhase _lastBroadcastPhase = GameSessionPhase.Unknown;
+    private GameLinkState _lastBroadcastLink = GameLinkState.Searching;
+    private AgentState _lastBroadcastState = AgentState.Stopped;
 
     public AgentStatus CurrentStatus { get { lock (_statusLock) return _status; } }
     public AgentConfiguration Configuration => _config;
@@ -154,13 +158,26 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                     _reader.Connect();
                     if (!_reader.IsConnected)
                     {
+                        bool isGameProc = _config.DataSource == DataSourceType.LiveMemory && IsAccProcessRunning();
                         UpdateStatus(s =>
                         {
-                            s.GameLink = _config.DataSource == DataSourceType.LiveMemory
-                                ? GameLinkState.Searching
-                                : GameLinkState.Disconnected;
+                            if (isGameProc)
+                            {
+                                s.GameLink = GameLinkState.Connected;
+                                s.SessionPhase = GameSessionPhase.InLobbyOrMenu;
+                                s.CurrentCarModel = "Assetto Corsa Competizione";
+                                s.CurrentTrack = "Main Menu / Lobby";
+                            }
+                            else
+                            {
+                                s.GameLink = _config.DataSource == DataSourceType.LiveMemory
+                                    ? GameLinkState.Searching
+                                    : GameLinkState.Disconnected;
+                                s.SessionPhase = GameSessionPhase.Unknown;
+                            }
                             s.CurrentHz = 0;
                         });
+                        await Task.Delay(200, ct);
                         continue;
                     }
                 }
@@ -168,10 +185,19 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                 // 2. Read Graphics state first to evaluate session and pit flags
                 if (!_reader.TryReadGraphics(out var graphics))
                 {
+                    bool isGameProc = _config.DataSource == DataSourceType.LiveMemory && IsAccProcessRunning();
                     UpdateStatus(s =>
                     {
-                        s.GameLink = GameLinkState.Searching;
-                        s.SessionPhase = GameSessionPhase.Unknown;
+                        if (isGameProc)
+                        {
+                            s.GameLink = GameLinkState.Connected;
+                            s.SessionPhase = GameSessionPhase.InLobbyOrMenu;
+                        }
+                        else
+                        {
+                            s.GameLink = GameLinkState.Searching;
+                            s.SessionPhase = GameSessionPhase.Unknown;
+                        }
                     });
                     continue;
                 }
@@ -383,13 +409,52 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
         });
     }
 
-    private void UpdateStatus(Action<AgentStatus> updater)
+    private void UpdateStatus(Action<AgentStatus> updater, bool forceBroadcast = false)
     {
         lock (_statusLock)
         {
             updater(_status);
-            StatusChanged?.Invoke(_status);
+
+            bool stateChanged = _status.State != _lastBroadcastState ||
+                                _status.GameLink != _lastBroadcastLink ||
+                                _status.SessionPhase != _lastBroadcastPhase;
+
+            if (forceBroadcast || stateChanged || _statusBroadcastStopwatch.ElapsedMilliseconds >= 250)
+            {
+                _statusBroadcastStopwatch.Restart();
+                _lastBroadcastState = _status.State;
+                _lastBroadcastLink = _status.GameLink;
+                _lastBroadcastPhase = _status.SessionPhase;
+
+                var snapshot = _status.Clone();
+                StatusChanged?.Invoke(snapshot);
+            }
         }
+    }
+
+    private static bool IsAccProcessRunning()
+    {
+        try
+        {
+            var processes = System.Diagnostics.Process.GetProcesses();
+            foreach (var p in processes)
+            {
+                try
+                {
+                    string n = p.ProcessName;
+                    if (n.Equals("acc", StringComparison.OrdinalIgnoreCase) ||
+                        n.Equals("AC2-Win64-Shipping", StringComparison.OrdinalIgnoreCase) ||
+                        n.StartsWith("AC2", StringComparison.OrdinalIgnoreCase) ||
+                        n.Contains("AssettoCorsa", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return false;
     }
 
     public async ValueTask DisposeAsync()

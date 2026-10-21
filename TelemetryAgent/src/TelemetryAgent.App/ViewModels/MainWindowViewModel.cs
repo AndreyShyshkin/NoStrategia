@@ -56,6 +56,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private string _sectorText = "Sector: -";
     private string _tyrePressuresText = "FL: -- | FR: -- | RL: -- | RR: --";
     private string _tyreTempsText = "Tyre Temps: -- °C";
+    private int _isUiFramePending;
+    private TelemetryPayload? _latestFrame;
+    private float _maxObservedSteer = 57.3f;
+    private double _maxCarRpm = 7500.0;
 
     // Mode indicator (Dev vs Production)
 #if PROD_MODE
@@ -322,50 +326,90 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             _ = _traceRecorder.RecordFrameAsync(p);
         }
 
-        Dispatcher.UIThread.Post(() =>
+        _latestFrame = p;
+        if (System.Threading.Interlocked.CompareExchange(ref _isUiFramePending, 1, 0) == 0)
         {
-            SpeedText = $"{Math.Round(p.SpeedKmh)}";
-            GearText = p.Gear <= 0 ? "R" : p.Gear == 1 ? "1" : $"{p.Gear}";
-            RpmText = $"{p.Rpm} RPM";
-            RpmProgress = Math.Clamp(p.Rpm / 7500.0, 0.0, 1.0);
-            ThrottleProgress = Math.Clamp(p.Gas, 0.0, 1.0);
-            BrakeProgress = Math.Clamp(p.Brake, 0.0, 1.0);
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    var frame = _latestFrame;
+                    if (frame != null)
+                    {
+                        RenderMiniHud(frame);
+                    }
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Exchange(ref _isUiFramePending, 0);
+                }
+            });
+        }
+    }
 
-            // Steering angle calculation and visual deflectors
-            float steerDeg = p.SteerAngle * (180.0f / MathF.PI);
-            SteerAngleDegrees = steerDeg;
-            if (steerDeg < -0.5f)
-            {
-                SteerText = $"◀ {Math.Abs(steerDeg):F1}° L";
-                SteerProgressLeft = Math.Clamp(Math.Abs(steerDeg) / 360.0, 0.0, 1.0);
-                SteerProgressRight = 0.0;
-            }
-            else if (steerDeg > 0.5f)
-            {
-                SteerText = $"{steerDeg:F1}° R ▶";
-                SteerProgressRight = Math.Clamp(steerDeg / 360.0, 0.0, 1.0);
-                SteerProgressLeft = 0.0;
-            }
-            else
-            {
-                SteerText = "0.0° CENTER";
-                SteerProgressLeft = 0.0;
-                SteerProgressRight = 0.0;
-            }
+    private void RenderMiniHud(TelemetryPayload p)
+    {
+        SpeedText = $"{Math.Round(p.SpeedKmh)}";
+        GearText = p.Gear <= 0 ? "R" : p.Gear == 1 ? "1" : $"{p.Gear}";
+        RpmText = $"{p.Rpm} RPM";
 
+        // Dynamically track and adapt redline RPM to current car
+        if (p.Rpm > _maxCarRpm) _maxCarRpm = p.Rpm;
+        RpmProgress = Math.Clamp(p.Rpm / _maxCarRpm, 0.0, 1.0);
+
+        ThrottleProgress = Math.Clamp(p.Gas, 0.0, 1.0);
+        BrakeProgress = Math.Clamp(p.Brake, 0.0, 1.0);
+
+        // Steering angle calculation and dynamic per-car lock angle
+        float steerDeg = p.SteerAngle * (180.0f / MathF.PI);
+        SteerAngleDegrees = steerDeg;
+
+        if (Math.Abs(steerDeg) > _maxObservedSteer)
+        {
+            _maxObservedSteer = Math.Max(57.3f, Math.Abs(steerDeg));
+        }
+
+        float maxSteer = _maxObservedSteer > 10.0f ? _maxObservedSteer : 57.3f;
+
+        if (steerDeg < -0.5f)
+        {
+            SteerText = $"◀ {Math.Abs(steerDeg):F1}° L";
+            SteerProgressLeft = Math.Clamp(Math.Abs(steerDeg) / maxSteer, 0.0, 1.0);
+            SteerProgressRight = 0.0;
+        }
+        else if (steerDeg > 0.5f)
+        {
+            SteerText = $"{steerDeg:F1}° R ▶";
+            SteerProgressRight = Math.Clamp(steerDeg / maxSteer, 0.0, 1.0);
+            SteerProgressLeft = 0.0;
+        }
+        else
+        {
+            SteerText = "0.0° CENTER";
+            SteerProgressLeft = 0.0;
+            SteerProgressRight = 0.0;
+        }
+
+        if (p.ICurrentTime > 0)
+        {
             var ts = TimeSpan.FromMilliseconds(p.ICurrentTime);
             LapTimeText = $"{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds:D3}";
-            SectorText = $"Sector {p.CurrentSectorIndex + 1} | Lap {p.CompletedLaps + 1}";
+        }
+        else
+        {
+            LapTimeText = "00:00.000";
+        }
 
-            if (p.WheelsPressure.Length >= 4)
-            {
-                TyrePressuresText = $"FL: {p.WheelsPressure[0]:F1} | FR: {p.WheelsPressure[1]:F1} | RL: {p.WheelsPressure[2]:F1} | RR: {p.WheelsPressure[3]:F1} PSI";
-            }
-            if (p.TyreCoreTemperature.Length >= 4)
-            {
-                TyreTempsText = $"Tyres: {p.TyreCoreTemperature[0]:F0}° / {p.TyreCoreTemperature[1]:F0}° / {p.TyreCoreTemperature[2]:F0}° / {p.TyreCoreTemperature[3]:F0}° C";
-            }
-        });
+        SectorText = $"Sector {p.CurrentSectorIndex + 1} | Lap {p.CompletedLaps + 1}";
+
+        if (p.WheelsPressure.Length >= 4)
+        {
+            TyrePressuresText = $"FL: {p.WheelsPressure[0]:F1} | FR: {p.WheelsPressure[1]:F1} | RL: {p.WheelsPressure[2]:F1} | RR: {p.WheelsPressure[3]:F1} PSI";
+        }
+        if (p.TyreCoreTemperature.Length >= 4)
+        {
+            TyreTempsText = $"Tyres: {p.TyreCoreTemperature[0]:F0}° / {p.TyreCoreTemperature[1]:F0}° / {p.TyreCoreTemperature[2]:F0}° / {p.TyreCoreTemperature[3]:F0}° C";
+        }
     }
 
     private void OnSetupSynced(SetupPayload s)
@@ -373,7 +417,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         Dispatcher.UIThread.Post(() =>
         {
             LastSetupSynced = s.FileName;
-            LastSetupHash = $"SHA-256: {s.Hash[..12]}... (Synced)";
+            string shortHash = s.Hash.Length >= 12 ? s.Hash[..12] : s.Hash;
+            LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
             FeedbackMessage = $"Setup synced: {s.FileName}";
         });
     }
@@ -474,7 +519,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         if (found != null)
         {
             LastSetupSynced = found.FileName;
-            LastSetupHash = $"SHA-256: {found.Hash[..12]}... (Synced)";
+            string shortHash = found.Hash.Length >= 12 ? found.Hash[..12] : found.Hash;
+            LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
             FeedbackMessage = $"Found & synced setup: {found.FileName}";
         }
         else
