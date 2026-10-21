@@ -1,0 +1,7 @@
+{
+  "configProperties": {
+    "System.GC.Server": false,
+    "System.Runtime.TieredCompilation": true,
+    "System.Runtime.TieredCompilation.QuickJit": true
+  }
+}

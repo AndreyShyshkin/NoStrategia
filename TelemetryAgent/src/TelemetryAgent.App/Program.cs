@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Win32;
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TelemetryAgent.Core.Mock;
@@ -20,7 +21,7 @@ class Program
             try
             {
                 string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
-                File.WriteAllText(logPath, $"[CRASH {DateTime.UtcNow:O}]\n{e.ExceptionObject}");
+                File.AppendAllText(logPath, $"[CRASH {DateTime.UtcNow:O}]\n{e.ExceptionObject}\n\n");
             }
             catch { }
         };
@@ -32,21 +33,57 @@ class Program
             return;
         }
 
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        bool forceSoftware = args.Any(a => a.Equals("--software", StringComparison.OrdinalIgnoreCase) ||
+                                          a.Equals("--software-render", StringComparison.OrdinalIgnoreCase))
+                             || Environment.GetEnvironmentVariable("AVALONIA_SOFTWARE") == "1";
+
+        if (forceSoftware)
+        {
+            BuildAvaloniaApp(forceSoftware: true).StartWithClassicDesktopLifetime(args);
+            return;
+        }
+
+        try
+        {
+            // Attempt standard platform detection with hardware backends
+            BuildAvaloniaApp(forceSoftware: false).StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            // Automatic fallback for Wine / Proton / FEX-Emu when GPU/D3D driver initialization fails
+            try
+            {
+                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
+                File.AppendAllText(logPath, $"[INFO] GPU acceleration failed ({ex.Message}). Retrying with Skia Software Rasterizer under Wine/FEX...\n");
+
+                BuildAvaloniaApp(forceSoftware: true).StartWithClassicDesktopLifetime(args);
+            }
+            catch (Exception fatal)
+            {
+                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
+                File.AppendAllText(logPath, $"[FATAL CRASH]: {fatal}\n");
+                throw;
+            }
+        }
     }
 
-    public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+    public static AppBuilder BuildAvaloniaApp(bool forceSoftware = false)
+    {
+        var renderingModes = forceSoftware
+            ? new[] { Win32RenderingMode.Software }
+            : new[]
+            {
+                Win32RenderingMode.AngleEgl,
+                Win32RenderingMode.Wgl,
+                Win32RenderingMode.Vulkan,
+                Win32RenderingMode.Software
+            };
+
+        return AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .With(new Win32PlatformOptions
             {
-                RenderingMode = new[]
-                {
-                    Win32RenderingMode.AngleEgl,
-                    Win32RenderingMode.Wgl,
-                    Win32RenderingMode.Vulkan,
-                    Win32RenderingMode.Software
-                },
+                RenderingMode = renderingModes,
                 CompositionMode = new[]
                 {
                     Win32CompositionMode.RedirectionSurface,
@@ -56,6 +93,7 @@ class Program
             })
             .WithInterFont()
             .LogToTrace();
+    }
 
     private static async Task RunHeadlessAsync(string[] args)
     {
