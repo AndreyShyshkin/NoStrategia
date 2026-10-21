@@ -1,5 +1,7 @@
 using Avalonia;
+using Avalonia.Win32;
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using TelemetryAgent.Core.Mock;
@@ -13,6 +15,16 @@ class Program
     [STAThread]
     public static async Task Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+        {
+            try
+            {
+                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "telemetry_agent_crash.log");
+                File.WriteAllText(logPath, $"[CRASH {DateTime.UtcNow:O}]\n{e.ExceptionObject}");
+            }
+            catch { }
+        };
+
         // Support headless/CLI execution for CI, Docker, or Wine background services
         if (args.Length > 0 && (args[0] == "--headless" || args[0] == "--cli" || args[0] == "--mock"))
         {
@@ -26,6 +38,22 @@ class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new Win32PlatformOptions
+            {
+                RenderingMode = new[]
+                {
+                    Win32RenderingMode.AngleEgl,
+                    Win32RenderingMode.Wgl,
+                    Win32RenderingMode.Vulkan,
+                    Win32RenderingMode.Software
+                },
+                CompositionMode = new[]
+                {
+                    Win32CompositionMode.RedirectionSurface,
+                    Win32CompositionMode.LowLatencyDxgiSwapChain,
+                    Win32CompositionMode.WinUIComposition
+                }
+            })
             .WithInterFont()
             .LogToTrace();
 

@@ -24,7 +24,9 @@
                 <!-- Branding & Shield Badge -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                     <Border Width="34" Height="34" CornerRadius="8" Background="#FF5500">
-                        <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+                        <!-- Vector Lightning Bolt Icon (No font dependency) -->
+                        <Path Data="M13 2L3 14h9l-1 8 10-12h-9l1-8z" Fill="White" Width="18" Height="18"
+                              Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -47,10 +49,24 @@
 
                 <!-- Header Actions -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Content="⚙ Settings" Click="OnSettingsClicked" Background="#1C1E2A" Foreground="#E0E2EC"
-                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12" />
-                    <Button Content="🗕 Tray" Click="OnMinimizeToTrayClicked" Background="#1C1E2A" Foreground="#E0E2EC"
-                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12" />
+                    <Button Click="OnSettingsClicked" Background="#1C1E2A" Foreground="#E0E2EC"
+                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <!-- Vector Gear Icon -->
+                            <Path Data="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+                                  Fill="#8B90A0" Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" />
+                            <TextBlock Text="Settings" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Click="OnMinimizeToTrayClicked" Background="#1C1E2A" Foreground="#E0E2EC"
+                            BorderBrush="#292C3D" BorderThickness="1" CornerRadius="6" Padding="14,7" FontWeight="SemiBold" FontSize="12">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <!-- Vector Tray/Minimize Icon -->
+                            <Path Data="M19 13H5v-2h14v2z"
+                                  Fill="#8B90A0" Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" />
+                            <TextBlock Text="Tray" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -68,9 +84,10 @@
                     <Border Grid.Row="0" Grid.Column="0" Margin="0,0,8,8" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
                         <StackPanel Spacing="10">
                             <Grid ColumnDefinitions="*,Auto">
-                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="⚡" FontSize="14" Foreground="#FF5500" />
-                                    <TextBlock Text="AGENT STATUS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <!-- Vector Lightning -->
+                                    <Path Data="M13 2L3 14h9l-1 8 10-12h-9l1-8z" Fill="#FF5500" Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock Text="AGENT STATUS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Border Grid.Column="1" Background="{Binding AgentStatusColor}" CornerRadius="12" Padding="10,3">
                                     <TextBlock Text="{Binding AgentStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
@@ -90,9 +107,11 @@
                     <Border Grid.Row="0" Grid.Column="1" Margin="8,0,0,8" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
                         <StackPanel Spacing="10">
                             <Grid ColumnDefinitions="*,Auto">
-                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🎮" FontSize="14" Foreground="#00E5FF" />
-                                    <TextBlock Text="GAME PROCESS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <!-- Vector Gamepad -->
+                                    <Path Data="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-10 7H8v3H6v-3H3v-2h3V8h2v3h3v2zm4.5 2c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3-3c-.83 0-1.5-.67-1.5-1.5S17.67 9 18.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"
+                                          Fill="#00E5FF" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock Text="GAME PROCESS" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Border Grid.Column="1" Background="{Binding GameStatusColor}" CornerRadius="12" Padding="10,3">
                                     <TextBlock Text="{Binding GameStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
@@ -109,9 +128,11 @@
                     <Border Grid.Row="1" Grid.Column="0" Margin="0,8,8,0" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
                         <StackPanel Spacing="10">
                             <Grid ColumnDefinitions="*,Auto">
-                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🌐" FontSize="14" Foreground="#2979FF" />
-                                    <TextBlock Text="BACKEND SERVER" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <!-- Vector Globe / Server -->
+                                    <Path Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"
+                                          Fill="#2979FF" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock Text="BACKEND SERVER" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Border Grid.Column="1" Background="{Binding ServerStatusColor}" CornerRadius="12" Padding="10,3">
                                     <TextBlock Text="{Binding ServerStatusBadge}" FontSize="11" FontWeight="Bold" Foreground="#0D0E12" />
@@ -131,9 +152,11 @@
                     <Border Grid.Row="1" Grid.Column="1" Margin="8,8,0,0" Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="16">
                         <StackPanel Spacing="10">
                             <Grid ColumnDefinitions="*,Auto">
-                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="📁" FontSize="14" Foreground="#FFD600" />
-                                    <TextBlock Text="SETUP INTERCEPTOR" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" />
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <!-- Vector Folder -->
+                                    <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
+                                          Fill="#FFD600" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" />
+                                    <TextBlock Text="SETUP INTERCEPTOR" FontWeight="Bold" FontSize="12" Foreground="#8B90A0" LetterSpacing="0.5" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Border Grid.Column="1" Background="#122B1E" CornerRadius="12" Padding="10,3">
                                     <TextBlock Text="ACTIVE" FontSize="11" FontWeight="Bold" Foreground="#00E676" />
@@ -222,10 +245,10 @@
                         <Grid ColumnDefinitions="Auto,*,Auto">
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                                 <TextBlock Text="DATA SOURCE:" FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" />
-                                <Button Content="🎮 Live ACC (Wine/Win32)" Click="OnSwitchToLiveClicked"
+                                <Button Content="Live ACC (Wine/Win32)" Click="OnSwitchToLiveClicked"
                                         Background="#1C1E2C" Foreground="#FFFFFF" BorderBrush="#35384D" BorderThickness="1"
                                         CornerRadius="6" Padding="10,5" FontSize="11" FontWeight="SemiBold" />
-                                <Button Content="🧪 Mock GT3 Simulator" Click="OnSwitchToMockClicked"
+                                <Button Content="Mock GT3 Simulator" Click="OnSwitchToMockClicked"
                                         Background="#FF5500" Foreground="#FFFFFF" BorderBrush="#FF5500" BorderThickness="1"
                                         CornerRadius="6" Padding="10,5" FontSize="11" FontWeight="Bold" />
                             </StackPanel>
@@ -240,16 +263,16 @@
                         <Grid ColumnDefinitions="Auto,*">
                             <TextBlock Grid.Column="0" Text="TEST ANOMALIES:" FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" Margin="0,0,10,0" />
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                <Button Content="⚠ Wheel Lockup" Click="OnInjectLockupClicked"
+                                <Button Content="Wheel Lockup" Click="OnInjectLockupClicked"
                                         Background="#2B161B" Foreground="#FF5252" BorderBrush="#FF1744" BorderThickness="1"
                                         CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
-                                <Button Content="⟳ Oversteer Spin" Click="OnInjectOversteerClicked"
+                                <Button Content="Oversteer Spin" Click="OnInjectOversteerClicked"
                                         Background="#2B2114" Foreground="#FFB74D" BorderBrush="#FF9100" BorderThickness="1"
                                         CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
-                                <Button Content="⛽ Fuel Critical" Click="OnInjectFuelClicked"
+                                <Button Content="Fuel Critical" Click="OnInjectFuelClicked"
                                         Background="#231B2B" Foreground="#E040FB" BorderBrush="#D500F9" BorderThickness="1"
                                         CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
-                                <Button Content="⚙ Test Setup Sync" Click="OnGenerateTestSetupClicked"
+                                <Button Content="Test Setup Sync" Click="OnGenerateTestSetupClicked"
                                         Background="#122B1E" Foreground="#69F0AE" BorderBrush="#00E676" BorderThickness="1"
                                         CornerRadius="6" Padding="10,4" FontSize="11" FontWeight="SemiBold" />
                             </StackPanel>
@@ -261,7 +284,9 @@
                 <Border Background="#161722" BorderBrush="#242636" BorderThickness="1" CornerRadius="10" Padding="14" IsVisible="{Binding !IsDevMode}">
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <TextBlock Text="🛡️" FontSize="14" VerticalAlignment="Center" />
+                            <!-- Vector Shield Icon -->
+                            <Path Data="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"
+                                  Fill="#00E676" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" />
                             <TextBlock Text="OPERATIONAL MODE: LIVE ASSETTO CORSA COMPETIZIONE IPC (UNMANAGED SHARED MEMORY)"
                                        FontSize="11" FontWeight="Bold" Foreground="#8B90A0" VerticalAlignment="Center" />
                         </StackPanel>
@@ -280,7 +305,7 @@
         <Border Grid.Row="2" Background="#13141B" BorderBrush="#20222E" BorderThickness="0,1,0,0" Padding="20,8">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding FeedbackMessage}" FontSize="12" Foreground="#00E676" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="CourseWork Theme #9 • Edge Telemetry Ingestion Agent" FontSize="11" Foreground="#5A5E70" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="Edge Telemetry Ingestion Agent" FontSize="11" Foreground="#5A5E70" VerticalAlignment="Center" />
             </Grid>
         </Border>
 
