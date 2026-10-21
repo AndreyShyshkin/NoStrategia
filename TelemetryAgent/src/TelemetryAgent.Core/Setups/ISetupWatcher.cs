@@ -16,6 +16,6 @@ public interface ISetupWatcher : IDisposable
     void Stop();
     void SetDirectory(string directoryPath);
     Task<SetupPayload?> ProcessSetupFileAsync(string filePath, bool force = false, CancellationToken ct = default);
-    Task<SetupPayload?> ScanExistingSetupsAsync(CancellationToken ct = default);
+    Task<SetupPayload?> ScanExistingSetupsAsync(bool force = false, CancellationToken ct = default);
     Task<SetupPayload?> TryLoadSetupForCarAndTrackAsync(string carModel, string track, CancellationToken ct = default);
 }

@@ -45,6 +45,8 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
     private double _effectiveHz;
 
     private string _lastQueriedCar = string.Empty;
+    private string _lastQueriedTrack = string.Empty;
+    private GameSessionPhase _lastQueriedPhase = GameSessionPhase.Unknown;
     private readonly System.Diagnostics.Stopwatch _statusBroadcastStopwatch = System.Diagnostics.Stopwatch.StartNew();
     private GameSessionPhase _lastBroadcastPhase = GameSessionPhase.Unknown;
     private GameLinkState _lastBroadcastLink = GameLinkState.Searching;
@@ -209,11 +211,24 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                 string car = !string.IsNullOrWhiteSpace(staticData.CarModel) ? staticData.CarModel : _status.CurrentCarModel;
                 string trk = !string.IsNullOrWhiteSpace(staticData.Track) ? staticData.Track : _status.CurrentTrack;
 
-                // If car/track changed, auto-query setups watcher for active setup
-                if (!string.IsNullOrEmpty(car) && car != _lastQueriedCar)
+                // Auto-query setups watcher when entering track, pitlane or garage, or if car/track changed
+                bool enteringSessionOrTrack = (phase == GameSessionPhase.LiveOnTrack && _lastQueriedPhase != GameSessionPhase.LiveOnTrack) ||
+                                              (phase == GameSessionPhase.InGarageSetup && _lastQueriedPhase != GameSessionPhase.InGarageSetup) ||
+                                              (phase == GameSessionPhase.InPitLane && _lastQueriedPhase == GameSessionPhase.InLobbyOrMenu);
+
+                bool carOrTrackChanged = (!string.IsNullOrEmpty(car) && car != _lastQueriedCar) ||
+                                         (!string.IsNullOrEmpty(trk) && trk != _lastQueriedTrack);
+
+                if (carOrTrackChanged || enteringSessionOrTrack)
                 {
                     _lastQueriedCar = car;
+                    _lastQueriedTrack = trk;
+                    _lastQueriedPhase = phase;
                     _ = _setupWatcher.TryLoadSetupForCarAndTrackAsync(car, trk);
+                }
+                else
+                {
+                    _lastQueriedPhase = phase;
                 }
 
                 // Always read Physics for live input monitoring (steer angle, pedals)
@@ -329,16 +344,22 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
         {
             try
             {
-                bool synced = await _ingestionClient.SendSetupAsync(payload);
-                if (synced)
+                // Format informative display name (e.g. "Spa / Active.json" or "Active.json")
+                string displayName = !string.IsNullOrEmpty(payload.Track)
+                    ? $"{payload.Track} / {payload.FileName}"
+                    : payload.FileName;
+
+                // Always update local status and invoke event, regardless of backend connection state
+                UpdateStatus(s =>
                 {
-                    UpdateStatus(s =>
-                    {
-                        s.LastSyncedSetupName = payload.FileName;
-                        s.LastSyncedSetupTime = payload.Timestamp;
-                    });
-                    SetupSynced?.Invoke(payload);
-                }
+                    s.LastSyncedSetupName = displayName;
+                    s.LastSyncedSetupTime = payload.Timestamp;
+                }, forceBroadcast: true);
+
+                SetupSynced?.Invoke(payload);
+
+                // Dispatch to backend ingestion server
+                await _ingestionClient.SendSetupAsync(payload);
             }
             catch
             {

@@ -179,6 +179,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _coordinator.SetupSynced += OnSetupSynced;
 
         _ = _coordinator.StartAsync();
+        _ = RefreshSetupsAsync();
     }
 
     private void OnCoordinatorStatusChanged(AgentStatus status)
@@ -350,7 +351,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private void RenderMiniHud(TelemetryPayload p)
     {
         SpeedText = $"{Math.Round(p.SpeedKmh)}";
-        GearText = p.Gear <= 0 ? "R" : p.Gear == 1 ? "1" : $"{p.Gear}";
+        GearText = p.Gear switch
+        {
+            0 => "R",
+            1 => "N",
+            > 1 => $"{p.Gear - 1}",
+            _ => "N"
+        };
         RpmText = $"{p.Rpm} RPM";
 
         // Dynamically track and adapt redline RPM to current car
@@ -416,10 +423,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     {
         Dispatcher.UIThread.Post(() =>
         {
-            LastSetupSynced = s.FileName;
+            string displayName = !string.IsNullOrEmpty(s.Track) ? $"{s.Track} / {s.FileName}" : s.FileName;
+            LastSetupSynced = displayName;
             string shortHash = s.Hash.Length >= 12 ? s.Hash[..12] : s.Hash;
             LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
-            FeedbackMessage = $"Setup synced: {s.FileName}";
+            FeedbackMessage = $"Setup synced: {displayName}";
         });
     }
 
@@ -518,10 +526,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         var found = await _coordinator.RefreshSetupsAsync();
         if (found != null)
         {
-            LastSetupSynced = found.FileName;
+            string displayName = !string.IsNullOrEmpty(found.Track) ? $"{found.Track} / {found.FileName}" : found.FileName;
+            LastSetupSynced = displayName;
             string shortHash = found.Hash.Length >= 12 ? found.Hash[..12] : found.Hash;
             LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
-            FeedbackMessage = $"Found & synced setup: {found.FileName}";
+            FeedbackMessage = $"Found & synced setup: {displayName}";
         }
         else
         {

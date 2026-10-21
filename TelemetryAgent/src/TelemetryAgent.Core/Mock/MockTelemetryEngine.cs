@@ -87,7 +87,7 @@ public sealed class MockTelemetryEngine : ITelemetryReader
                 gas = 1.0f;
                 brake = 0.0f;
                 steer = 0.02f * MathF.Sin((float)s * 50f);
-                gear = 6;
+                gear = 7; // ACC: 7 = 6th gear (0=R, 1=N, 2=1st... 7=6th)
                 lateralG = 0.2f;
             }
             else if (s is >= 0.30 and < 0.35 or >= 0.92 and < 0.96)
@@ -97,7 +97,7 @@ public sealed class MockTelemetryEngine : ITelemetryReader
                 gas = 0.0f;
                 brake = 0.85f;
                 steer = 0.05f;
-                gear = 2;
+                gear = 3; // ACC: 3 = 2nd gear
                 lateralG = -0.3f;
             }
             else if (s is >= 0.52 and < 0.62)
@@ -107,7 +107,7 @@ public sealed class MockTelemetryEngine : ITelemetryReader
                 gas = 0.65f;
                 brake = 0.0f;
                 steer = -0.22f; // Left turn
-                gear = 4;
+                gear = 5; // ACC: 5 = 4th gear
                 lateralG = -2.6f; // High cornering load
             }
             else
@@ -117,7 +117,7 @@ public sealed class MockTelemetryEngine : ITelemetryReader
                 gas = 0.75f;
                 brake = 0.0f;
                 steer = 0.18f * MathF.Sin((float)s * 30f);
-                gear = 3;
+                gear = 4; // ACC: 4 = 3rd gear
                 lateralG = 1.4f * MathF.Sin((float)s * 20f);
             }
 

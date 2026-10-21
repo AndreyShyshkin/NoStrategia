@@ -16,6 +16,7 @@ public sealed class SetupWatcherService : ISetupWatcher
     private Timer? _pollTimer;
     private string _watchDirectory;
     private readonly Dictionary<string, string> _fileHashes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _fileTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private bool _isActive;
 
@@ -181,26 +182,26 @@ public sealed class SetupWatcherService : ISetupWatcher
                 _watcher.Created += OnFileEvent;
                 _isActive = true;
 
-                // Start periodic poll timer (every 3s) for Wine compatibility
+                // Start periodic poll timer (every 1.5s) to catch game setup Load/Save under Wine
                 _pollTimer = new Timer(async _ =>
                 {
                     try
                     {
-                        var payload = await ScanExistingSetupsAsync();
+                        var payload = await ScanExistingSetupsAsync(force: false);
                         if (payload != null)
                         {
                             SetupDetected?.Invoke(payload);
                         }
                     }
                     catch { }
-                }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3));
+                }, null, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1500));
 
                 // Initial scan: immediately discover existing setups (e.g. Active.json)
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        var payload = await ScanExistingSetupsAsync();
+                        var payload = await ScanExistingSetupsAsync(force: true);
                         if (payload != null)
                         {
                             SetupDetected?.Invoke(payload);
@@ -251,7 +252,7 @@ public sealed class SetupWatcherService : ISetupWatcher
         if (wasActive) Start();
     }
 
-    public async Task<SetupPayload?> ScanExistingSetupsAsync(CancellationToken ct = default)
+    public async Task<SetupPayload?> ScanExistingSetupsAsync(bool force = false, CancellationToken ct = default)
     {
         if (!Directory.Exists(_watchDirectory))
         {
@@ -268,11 +269,14 @@ public sealed class SetupWatcherService : ISetupWatcher
 
             if (files.Count == 0) return null;
 
-            // Prefer Active.json if recently saved, or newest setup
-            var targetFile = files.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase))
-                             ?? files[0];
+            // Prefer Active.json if recently saved, or newest setup file
+            var newest = files[0];
+            var active = files.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
+            var targetFile = (active != null && (newest.FullName.Equals(active.FullName, StringComparison.OrdinalIgnoreCase) || Math.Abs((newest.LastWriteTimeUtc - active.LastWriteTimeUtc).TotalSeconds) <= 3))
+                ? active
+                : newest;
 
-            return await ProcessSetupFileAsync(targetFile.FullName, force: true, ct);
+            return await ProcessSetupFileAsync(targetFile.FullName, force: force, ct);
         }
         catch
         {
@@ -283,7 +287,14 @@ public sealed class SetupWatcherService : ISetupWatcher
     public async Task<SetupPayload?> TryLoadSetupForCarAndTrackAsync(string carModel, string track, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(carModel) || !Directory.Exists(_watchDirectory))
-            return null;
+        {
+            var fallback = await ScanExistingSetupsAsync(force: true, ct);
+            if (fallback != null)
+            {
+                SetupDetected?.Invoke(fallback);
+            }
+            return fallback;
+        }
 
         try
         {
@@ -298,7 +309,15 @@ public sealed class SetupWatcherService : ISetupWatcher
                     return dNorm.Contains(normCar) || normCar.Contains(dNorm);
                 });
 
-            if (carDir == null) return null;
+            if (carDir == null)
+            {
+                var fallback = await ScanExistingSetupsAsync(force: true, ct);
+                if (fallback != null)
+                {
+                    SetupDetected?.Invoke(fallback);
+                }
+                return fallback;
+            }
 
             // Find track folder (e.g. Spa)
             DirectoryInfo? trackDir = null;
@@ -318,10 +337,21 @@ public sealed class SetupWatcherService : ISetupWatcher
                 .OrderByDescending(f => f.LastWriteTimeUtc)
                 .ToList();
 
-            if (jsonFiles.Count == 0) return null;
+            if (jsonFiles.Count == 0)
+            {
+                var fallback = await ScanExistingSetupsAsync(force: true, ct);
+                if (fallback != null)
+                {
+                    SetupDetected?.Invoke(fallback);
+                }
+                return fallback;
+            }
 
-            var target = jsonFiles.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase))
-                         ?? jsonFiles[0];
+            var newest = jsonFiles[0];
+            var active = jsonFiles.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
+            var target = (active != null && (newest.FullName.Equals(active.FullName, StringComparison.OrdinalIgnoreCase) || Math.Abs((newest.LastWriteTimeUtc - active.LastWriteTimeUtc).TotalSeconds) <= 3))
+                ? active
+                : newest;
 
             var payload = await ProcessSetupFileAsync(target.FullName, force: true, ct);
             if (payload != null)
@@ -379,19 +409,24 @@ public sealed class SetupWatcherService : ISetupWatcher
         if (string.IsNullOrWhiteSpace(content)) return null;
 
         string currentHash = ComputeSha256(content);
+        DateTime writeTime = File.GetLastWriteTimeUtc(filePath);
 
         lock (_lock)
         {
-            if (!force && _fileHashes.TryGetValue(filePath, out string? lastHash) && lastHash == currentHash)
+            bool sameHash = _fileHashes.TryGetValue(filePath, out string? lastHash) && lastHash == currentHash;
+            bool sameTime = _fileTimestamps.TryGetValue(filePath, out DateTime lastTime) && lastTime == writeTime;
+
+            if (!force && sameHash && sameTime)
             {
                 // Skip duplicate I/O event
                 return null;
             }
 
             _fileHashes[filePath] = currentHash;
+            _fileTimestamps[filePath] = writeTime;
             LastSyncedFile = Path.GetFileName(filePath);
             LastSyncedHash = currentHash;
-            LastSyncedTime = DateTime.UtcNow;
+            LastSyncedTime = writeTime;
         }
 
         JsonElement jsonElement;
