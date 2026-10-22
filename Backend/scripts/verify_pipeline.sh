@@ -91,7 +91,7 @@ echo -e "${GREEN}[OK] Redis Streams have recorded all incoming frames and setup 
 
 echo -e "${BLUE}=== 6. Verifying TimescaleDB Hypertables & Seed Data ===${NC}"
 docker compose exec -T timescaledb psql -U postgres -d telemetry -c "
-  SELECT hypertable_name, chunk_time_interval, compression_enabled 
+  SELECT hypertable_name, num_dimensions, num_chunks, compression_enabled 
   FROM timescaledb_information.hypertables 
   WHERE hypertable_name = 'telemetry_samples';
 "

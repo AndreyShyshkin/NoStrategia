@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for high-performance Ingestion API Gateway
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /build
 
@@ -9,7 +9,7 @@ RUN go mod download
 
 # Copy source tree and compile static binary
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/ingestion-api ./cmd/server
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/ingestion-api ./cmd/server
 
 # Minimal production image
 FROM alpine:3.21
