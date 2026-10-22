@@ -91,6 +91,11 @@ public partial class MainWindow : Window
         _vm.InjectFuelAlert();
     }
 
+    private void OnInjectPitLaneClicked(object? sender, RoutedEventArgs e)
+    {
+        _vm.InjectPitLane();
+    }
+
     private async void OnGenerateTestSetupClicked(object? sender, RoutedEventArgs e)
     {
         await _vm.GenerateTestSetupAsync();

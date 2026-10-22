@@ -470,6 +470,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         FeedbackMessage = "Injected Fuel Reserve Emergency Alert (1.15L)";
     }
 
+    public void InjectPitLane()
+    {
+        if (!IsDevMode) return;
+        _coordinator.AnomalyInjector.InjectAnomaly(AnomalyType.PitLaneEntry, durationTicks: 150);
+        FeedbackMessage = "Injected Pit Lane State (forces 10 Hz adaptive downsampling)";
+    }
+
     public async Task GenerateTestSetupAsync()
     {
         if (!IsDevMode) return;

@@ -73,6 +73,7 @@ public sealed class MockTelemetryEngine : ITelemetryReader
             // Stavelot / Blanchimont (s: 0.75 - 0.92): 220-280 km/h
             // Bus Stop Chicane (s: 0.92 - 1.00): 65-100 km/h
 
+            // High-fidelity kinematic model along Spa-Francorchamps (7004m)
             float targetSpeed;
             float gas;
             float brake;
@@ -80,48 +81,195 @@ public sealed class MockTelemetryEngine : ITelemetryReader
             int gear;
             float lateralG;
 
-            if (s is >= 0.18 and < 0.32 or >= 0.78 and < 0.92)
+            if (s is >= 0.00 and < 0.06)
             {
-                // High-speed straights (Kemmel & Blanchimont)
-                targetSpeed = 265f + 15f * MathF.Sin((float)s * 40f);
+                // Turn 1: La Source Hairpin (slow, tight right)
+                // Severe braking from straight, 1st gear, high steering lock (up to ~50 deg)
+                if (s < 0.02)
+                {
+                    targetSpeed = 68f;
+                    gas = 0.05f;
+                    brake = 0.70f;
+                    steer = 0.85f; // ~48.7° right
+                    gear = 2; // ACC 1st gear
+                    lateralG = 1.6f;
+                }
+                else
+                {
+                    targetSpeed = 105f;
+                    gas = 0.85f;
+                    brake = 0.0f;
+                    steer = 0.35f;
+                    gear = 3; // ACC 2nd gear
+                    lateralG = 1.2f;
+                }
+            }
+            else if (s is >= 0.06 and < 0.16)
+            {
+                // Eau Rouge & Raidillon uphill sweep (left-right-left uphill crest)
+                targetSpeed = 220f + 15f * MathF.Sin((float)s * 35f);
                 gas = 1.0f;
                 brake = 0.0f;
-                steer = 0.02f * MathF.Sin((float)s * 50f);
-                gear = 7; // ACC: 7 = 6th gear (0=R, 1=N, 2=1st... 7=6th)
-                lateralG = 0.2f;
+                steer = -0.16f * MathF.Sin((float)(s - 0.06) * 50f);
+                gear = targetSpeed > 210f ? 6 : 5; // ACC 5th/4th gear
+                lateralG = 2.1f * MathF.Cos((float)(s - 0.06) * 50f);
             }
-            else if (s is >= 0.30 and < 0.35 or >= 0.92 and < 0.96)
+            else if (s is >= 0.16 and < 0.28)
             {
-                // Heavy braking zones (Les Combes & Bus Stop)
-                targetSpeed = 85f;
-                gas = 0.0f;
-                brake = 0.85f;
-                steer = 0.05f;
-                gear = 3; // ACC: 3 = 2nd gear
-                lateralG = -0.3f;
+                // Kemmel Straight (Top speed draft run)
+                targetSpeed = 265f + 12f * MathF.Sin((float)s * 30f);
+                gas = 1.0f;
+                brake = 0.0f;
+                steer = 0.01f * MathF.Sin((float)s * 60f);
+                gear = 7; // ACC 6th gear
+                lateralG = 0.1f;
             }
-            else if (s is >= 0.52 and < 0.62)
+            else if (s is >= 0.28 and < 0.36)
             {
-                // Pouhon high-speed double-apex left
-                targetSpeed = 205f;
+                // Les Combes & Malmedy Chicane
+                if (s < 0.31)
+                {
+                    // Heavy threshold braking
+                    targetSpeed = 105f;
+                    gas = 0.0f;
+                    brake = 0.90f;
+                    steer = 0.05f;
+                    gear = 4; // ACC 3rd gear
+                    lateralG = -0.4f;
+                }
+                else
+                {
+                    // Right-left chicane
+                    targetSpeed = 125f;
+                    gas = 0.70f;
+                    brake = 0.0f;
+                    steer = 0.40f * MathF.Sin((float)(s - 0.31) * 80f);
+                    gear = 4; // ACC 3rd gear
+                    lateralG = 1.8f * MathF.Sin((float)(s - 0.31) * 80f);
+                }
+            }
+            else if (s is >= 0.36 and < 0.48)
+            {
+                // Bruxelles / Rivage Downhill Hairpin (long continuous right)
+                targetSpeed = 92f + 18f * (float)(s - 0.36) / 0.12f;
                 gas = 0.65f;
                 brake = 0.0f;
-                steer = -0.22f; // Left turn
-                gear = 5; // ACC: 5 = 4th gear
-                lateralG = -2.6f; // High cornering load
+                steer = 0.68f; // ~39° right
+                gear = 3; // ACC 2nd gear
+                lateralG = 1.85f;
+            }
+            else if (s is >= 0.48 and < 0.54)
+            {
+                // Corner 9 (Speaker's Corner / Liege)
+                targetSpeed = 150f;
+                gas = 0.85f;
+                brake = 0.0f;
+                steer = -0.32f; // ~18.3° left
+                gear = 4; // ACC 3rd gear
+                lateralG = -1.9f;
+            }
+            else if (s is >= 0.54 and < 0.65)
+            {
+                // Pouhon Double-Apex Left (Fastest, highest G corner)
+                targetSpeed = 202f + 8f * MathF.Sin((float)s * 25f);
+                gas = 0.72f;
+                brake = 0.0f;
+                steer = -0.42f; // ~24° left
+                gear = 5; // ACC 4th gear
+                lateralG = -2.65f; // High cornering load
+            }
+            else if (s is >= 0.65 and < 0.74)
+            {
+                // Les Fagnes Chicane (Pif-Paf)
+                targetSpeed = 140f + 15f * MathF.Sin((float)s * 30f);
+                gas = 0.75f;
+                brake = 0.0f;
+                steer = 0.36f * MathF.Sin((float)(s - 0.65) * 65f);
+                gear = 4; // ACC 3rd gear
+                lateralG = 1.7f * MathF.Sin((float)(s - 0.65) * 65f);
+            }
+            else if (s is >= 0.74 and < 0.82)
+            {
+                // Campus & Stavelot acceleration
+                targetSpeed = 160f + 70f * (float)(s - 0.74) / 0.08f;
+                gas = 1.0f;
+                brake = 0.0f;
+                steer = 0.22f * (1.0f - (float)(s - 0.74) / 0.08f);
+                gear = targetSpeed > 210f ? 6 : targetSpeed > 185f ? 5 : 4;
+                lateralG = 1.3f;
+            }
+            else if (s is >= 0.82 and < 0.92)
+            {
+                // Blanchimont Flat-Out Sweeper
+                targetSpeed = 270f + 10f * MathF.Sin((float)s * 30f);
+                gas = 1.0f;
+                brake = 0.0f;
+                steer = -0.06f; // Gentle left kink
+                gear = 7; // ACC 6th gear
+                lateralG = -1.2f;
             }
             else
             {
-                // Mid-speed twisty sectors
-                targetSpeed = 145f + 30f * MathF.Sin((float)s * 25f);
-                gas = 0.75f;
-                brake = 0.0f;
-                steer = 0.18f * MathF.Sin((float)s * 30f);
-                gear = 4; // ACC: 4 = 3rd gear
-                lateralG = 1.4f * MathF.Sin((float)s * 20f);
+                // Bus Stop Chicane (s: 0.92 to 1.00)
+                if (s < 0.95)
+                {
+                    // Brutal braking from 280 km/h to 60 km/h
+                    targetSpeed = 62f;
+                    gas = 0.0f;
+                    brake = 0.95f;
+                    steer = 0.05f;
+                    gear = 2; // ACC 1st gear
+                    lateralG = -0.4f;
+                }
+                else if (s < 0.98)
+                {
+                    // Sharp right-left chicane (tests max per-car steering lock)
+                    targetSpeed = 75f;
+                    gas = 0.40f;
+                    brake = 0.0f;
+                    steer = 0.90f * MathF.Sin((float)(s - 0.95) * 105f); // up to ~51.5° steering lock!
+                    gear = 2; // ACC 1st gear
+                    lateralG = 1.6f * MathF.Sin((float)(s - 0.95) * 105f);
+                }
+                else
+                {
+                    // Exit onto start-finish straight
+                    targetSpeed = 120f + 35f * (float)(s - 0.98) / 0.02f;
+                    gas = 1.0f;
+                    brake = 0.0f;
+                    steer = 0.02f;
+                    gear = 3; // ACC 2nd gear
+                    lateralG = 0.2f;
+                }
             }
 
-            int rpm = Math.Clamp((int)(targetSpeed * 27.5f) + 2000, 4200, 7400);
+            // Compute realistic GT3 engine RPM based on current gear and speed
+            int rpm = gear switch
+            {
+                2 => Math.Clamp((int)(4600 + (targetSpeed - 55f) * 65f), 4500, 7450),  // 1st gear (ACC 2)
+                3 => Math.Clamp((int)(4800 + (targetSpeed - 85f) * 55f), 4800, 7450),  // 2nd gear (ACC 3)
+                4 => Math.Clamp((int)(5100 + (targetSpeed - 120f) * 45f), 5100, 7450), // 3rd gear (ACC 4)
+                5 => Math.Clamp((int)(5300 + (targetSpeed - 165f) * 40f), 5300, 7450), // 4th gear (ACC 5)
+                6 => Math.Clamp((int)(5500 + (targetSpeed - 210f) * 38f), 5500, 7450), // 5th gear (ACC 6)
+                7 => Math.Clamp((int)(5800 + (targetSpeed - 250f) * 45f), 5800, 7400), // 6th gear (ACC 7)
+                _ => 6000
+            };
+
+            // Dynamic thermal physics
+            float frontBrakeTemp = brake > 0.4f ? 520f + brake * 110f : 390f + MathF.Sin((float)s * 10f) * 25f;
+            float rearBrakeTemp = brake > 0.4f ? 430f + brake * 80f : 350f + MathF.Sin((float)s * 10f) * 20f;
+
+            // Outside tyres in corners absorb more thermal energy
+            float flTemp = 87.5f + (lateralG > 1.2f ? 4.5f : 0f) + (brake > 0.5f ? 3.0f : 0f);
+            float frTemp = 88.0f + (lateralG < -1.2f ? 5.2f : 0f) + (brake > 0.5f ? 3.0f : 0f);
+            float rlTemp = 86.2f + (gas > 0.9f ? 2.5f : 0f);
+            float rrTemp = 86.8f + (gas > 0.9f ? 2.5f : 0f);
+
+            // Pressures expand slightly with heat
+            float flPsi = 27.4f + (flTemp - 85f) * 0.04f;
+            float frPsi = 27.5f + (frTemp - 85f) * 0.04f;
+            float rlPsi = 27.3f + (rlTemp - 85f) * 0.03f;
+            float rrPsi = 27.4f + (rrTemp - 85f) * 0.03f;
 
             // Advance vehicle position (16.66 ms tick delta at 60Hz)
             double metersPerSecond = targetSpeed / 3.6;
@@ -171,9 +319,9 @@ public sealed class MockTelemetryEngine : ITelemetryReader
                 WheelAngularSpeed = wheelSpeed,
                 SlipRatio = slipRatio,
                 SlipAngle = slipAngle,
-                WheelsPressure = [27.6f, 27.8f, 27.4f, 27.5f],
-                TyreCoreTemperature = [88.5f, 89.2f, 86.4f, 87.1f],
-                BrakeTemp = [480f, 495f, 380f, 390f],
+                WheelsPressure = [flPsi, frPsi, rlPsi, rrPsi],
+                TyreCoreTemperature = [flTemp, frTemp, rlTemp, rrTemp],
+                BrakeTemp = [frontBrakeTemp, frontBrakeTemp, rearBrakeTemp, rearBrakeTemp],
                 SuspensionTravel = [0.035f, 0.034f, 0.042f, 0.041f],
                 TC = 3.0f,
                 Abs = 3.0f,
