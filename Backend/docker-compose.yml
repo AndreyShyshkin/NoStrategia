@@ -1,0 +1,81 @@
+services:
+  # 1. High-Performance TimescaleDB (PostgreSQL 16 with Hypertable time-series extensions)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: nostrategia-timescaledb
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-telemetry}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${TIMESCALE_PORT:-5433}:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./timescaledb/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-telemetry}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telemetry-net
+    restart: unless-stopped
+
+  # 2. Redis 7.2 Message Broker & Stream Buffer
+  redis:
+    image: redis:7.2-alpine
+    container_name: nostrategia-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - telemetry-net
+    restart: unless-stopped
+
+  # 3. High-Throughput Ingestion API Gateway (Go Fiber)
+  ingestion-api:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    container_name: nostrategia-ingestion-api
+    ports:
+      - "${INGESTION_PORT:-4000}:4000"
+    environment:
+      PORT: 4000
+      HOST: 0.0.0.0
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_STREAM_TELEMETRY: ${REDIS_STREAM_TELEMETRY:-stream:telemetry:raw}
+      REDIS_STREAM_SETUPS: ${REDIS_STREAM_SETUPS:-stream:setups}
+      STREAM_MAXLEN: ${STREAM_MAXLEN:-10000}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@timescaledb:5432/${POSTGRES_DB:-telemetry}?sslmode=disable
+      FIBER_PREFORK: ${FIBER_PREFORK:-false}
+      CIRCUIT_BREAKER_MAX_FAILURES: ${CIRCUIT_BREAKER_MAX_FAILURES:-5}
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - telemetry-net
+    restart: unless-stopped
+
+networks:
+  telemetry-net:
+    name: telemetry-backend-net
+    driver: bridge
+
+volumes:
+  timescaledb_data:
+    name: nostrategia_timescaledb_data
+  redis_data:
+    name: nostrategia_redis_data
