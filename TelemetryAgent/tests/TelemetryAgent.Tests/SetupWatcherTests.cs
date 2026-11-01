@@ -83,4 +83,86 @@ public class SetupWatcherTests
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task SetupWatcher_DoesNotSyncInLobbyOrUnknownCar()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "NoStrategia_TestLobby_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await SetupSampleGenerator.CreateTestSetupFileAsync(
+                tempDir,
+                carName: "bentley_continental_gt3_2018",
+                track: "Spa",
+                setupName: "Bentley_SPA_Q.json");
+
+            var watcher = new SetupWatcherService(tempDir);
+
+            // Empty car / lobby names must NOT load any setup
+            var emptyResult = await watcher.TryLoadSetupForCarAndTrackAsync("", "");
+            Assert.Null(emptyResult);
+
+            var lobbyResult = await watcher.TryLoadSetupForCarAndTrackAsync("Assetto Corsa Competizione", "Main Menu / Lobby");
+            Assert.Null(lobbyResult);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SetupWatcher_MatchesActiveSetupFromLiveTelemetry()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "NoStrategia_TestMatch_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string trackDir = Path.Combine(tempDir, "bentley_continental_gt3_2018", "Spa");
+            Directory.CreateDirectory(trackDir);
+
+            // Setup 1: Quali (Fuel 17, TC 2)
+            string qJson = """
+            {
+                "carName": "bentley_continental_gt3_2018",
+                "basicSetup": {
+                    "strategy": { "fuel": 17 },
+                    "electronics": { "tC1": 2, "abs": 2, "eCUMap": 0 }
+                }
+            }
+            """;
+            await File.WriteAllTextAsync(Path.Combine(trackDir, "Bentley_SPA_Q.json"), qJson);
+
+            // Setup 2: Race (Fuel 55, TC 4)
+            string rJson = """
+            {
+                "carName": "bentley_continental_gt3_2018",
+                "basicSetup": {
+                    "strategy": { "fuel": 55 },
+                    "electronics": { "tC1": 4, "abs": 2, "eCUMap": 0 }
+                }
+            }
+            """;
+            await File.WriteAllTextAsync(Path.Combine(trackDir, "Bentley_SPA_R.json"), rJson);
+
+            var watcher = new SetupWatcherService(tempDir);
+
+            // When user loaded Q setup into car
+            var liveQ = new LiveCarSetupContext(Fuel: 17.0f, Tc: 2, Abs: 2, EngineMap: 0, InGarage: true);
+            var resultQ = await watcher.TryLoadSetupForCarAndTrackAsync("bentley_continental_gt3_2018", "Spa", liveQ);
+            Assert.NotNull(resultQ);
+            Assert.Equal("Bentley_SPA_Q.json", resultQ.FileName);
+            Assert.True(resultQ.IsLiveMatched);
+
+            // When user in garage loads R setup into car
+            var liveR = new LiveCarSetupContext(Fuel: 55.0f, Tc: 4, Abs: 2, EngineMap: 0, InGarage: true);
+            var resultR = await watcher.TryLoadSetupForCarAndTrackAsync("bentley_continental_gt3_2018", "Spa", liveR);
+            Assert.NotNull(resultR);
+            Assert.Equal("Bentley_SPA_R.json", resultR.FileName);
+            Assert.True(resultR.IsLiveMatched);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
 }

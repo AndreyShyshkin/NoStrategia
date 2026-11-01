@@ -37,14 +37,12 @@ public sealed class SetupWatcherService : ISetupWatcher
 
     /// <summary>
     /// Intelligent auto-discovery of ACC Setups folder across Windows and Wine/Proton/CrossOver bottles.
-    /// Prioritizes local container drives (C:\) over virtual host mappings (Z:\) and ranks folders
-    /// by the newest LastWriteTime of active setup files (e.g. bentley_continental_gt3_2018/Spa/Active.json).
+    /// Returns all existing valid setup directory candidates.
     /// </summary>
-    public static string FindAccSetupsDirectory()
+    public static List<string> FindAccSetupsCandidates()
     {
         var candidates = new List<string>();
 
-        // 1. Primary candidate in Wine/Proton containers: C:\users\steamuser\Documents
         string[] commonUsers = ["steamuser", "crossover", "wineuser", "default", "Public"];
         string[] localDrives = ["C:\\", "D:\\", "E:\\"];
 
@@ -70,7 +68,6 @@ public sealed class SetupWatcherService : ISetupWatcher
             }
         }
 
-        // 2. Standard Windows Documents via Environment APIs
         try
         {
             string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -87,7 +84,6 @@ public sealed class SetupWatcherService : ISetupWatcher
         }
         catch { }
 
-        // 3. Fallback host drive Z:\ (Wine root mapping to macOS host)
         string zUsers = Path.Combine("Z:\\", "users");
         if (Directory.Exists(zUsers))
         {
@@ -101,54 +97,53 @@ public sealed class SetupWatcherService : ISetupWatcher
             catch { }
         }
 
-        // Rank candidates:
-        // Priority 1: Has Active.json or .json files with the most recent modification timestamp
-        // Priority 2: Located on C:\ (inside the Wine bottle) rather than Z:\ (host)
+        return candidates
+            .Where(p => !string.IsNullOrWhiteSpace(p) && Directory.Exists(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Selects the primary ACC setups folder from available candidates.
+    /// </summary>
+    public static string FindAccSetupsDirectory()
+    {
+        var candidates = FindAccSetupsCandidates();
         string? bestCandidate = null;
         DateTime bestTimestampUtc = DateTime.MinValue;
         bool bestHasActive = false;
         string? firstExisting = null;
 
-        foreach (var path in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var path in candidates)
         {
-            if (string.IsNullOrWhiteSpace(path)) continue;
-
             try
             {
-                if (Directory.Exists(path))
+                firstExisting ??= path;
+
+                var files = new DirectoryInfo(path).GetFiles("*.json", SearchOption.AllDirectories);
+                if (files.Length > 0)
                 {
-                    firstExisting ??= path;
+                    bool hasActive = files.Any(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
+                    DateTime newest = files.Max(f => f.LastWriteTimeUtc);
+                    bool isCDrive = path.StartsWith("C:", StringComparison.OrdinalIgnoreCase);
 
-                    var files = new DirectoryInfo(path).GetFiles("*.json", SearchOption.AllDirectories);
-                    if (files.Length > 0)
+                    if (bestCandidate == null ||
+                        (hasActive && !bestHasActive) ||
+                        (hasActive == bestHasActive && isCDrive && !bestCandidate.StartsWith("C:", StringComparison.OrdinalIgnoreCase)) ||
+                        (hasActive == bestHasActive && newest > bestTimestampUtc))
                     {
-                        bool hasActive = files.Any(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
-                        DateTime newest = files.Max(f => f.LastWriteTimeUtc);
-                        bool isCDrive = path.StartsWith("C:", StringComparison.OrdinalIgnoreCase);
-
-                        // If current candidate has Active.json or is newer or is on C: drive
-                        if (bestCandidate == null ||
-                            (hasActive && !bestHasActive) ||
-                            (hasActive == bestHasActive && isCDrive && !bestCandidate.StartsWith("C:", StringComparison.OrdinalIgnoreCase)) ||
-                            (hasActive == bestHasActive && newest > bestTimestampUtc))
-                        {
-                            bestCandidate = path;
-                            bestTimestampUtc = newest;
-                            bestHasActive = hasActive;
-                        }
+                        bestCandidate = path;
+                        bestTimestampUtc = newest;
+                        bestHasActive = hasActive;
                     }
                 }
             }
             catch { }
         }
 
-        if (bestCandidate != null)
-            return bestCandidate;
+        if (bestCandidate != null) return bestCandidate;
+        if (firstExisting != null) return firstExisting;
 
-        if (firstExisting != null)
-            return firstExisting;
-
-        // Fallback default
         return Path.Combine("C:\\", "users", "steamuser", "Documents", "Assetto Corsa Competizione", "Setups");
     }
 
@@ -160,7 +155,6 @@ public sealed class SetupWatcherService : ISetupWatcher
 
             try
             {
-                // Re-evaluate watch directory if current does not exist
                 if (!Directory.Exists(_watchDirectory))
                 {
                     _watchDirectory = FindAccSetupsDirectory();
@@ -181,34 +175,6 @@ public sealed class SetupWatcherService : ISetupWatcher
                 _watcher.Changed += OnFileEvent;
                 _watcher.Created += OnFileEvent;
                 _isActive = true;
-
-                // Start periodic poll timer (every 1.5s) to catch game setup Load/Save under Wine
-                _pollTimer = new Timer(async _ =>
-                {
-                    try
-                    {
-                        var payload = await ScanExistingSetupsAsync(force: false);
-                        if (payload != null)
-                        {
-                            SetupDetected?.Invoke(payload);
-                        }
-                    }
-                    catch { }
-                }, null, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(1500));
-
-                // Initial scan: immediately discover existing setups (e.g. Active.json)
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var payload = await ScanExistingSetupsAsync(force: true);
-                        if (payload != null)
-                        {
-                            SetupDetected?.Invoke(payload);
-                        }
-                    }
-                    catch { }
-                });
             }
             catch (Exception)
             {
@@ -284,78 +250,135 @@ public sealed class SetupWatcherService : ISetupWatcher
         }
     }
 
-    public async Task<SetupPayload?> TryLoadSetupForCarAndTrackAsync(string carModel, string track, CancellationToken ct = default)
+    public async Task<SetupPayload?> TryLoadSetupForCarAndTrackAsync(
+        string carModel,
+        string track,
+        LiveCarSetupContext? liveContext = null,
+        bool force = false,
+        CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(carModel) || !Directory.Exists(_watchDirectory))
+        if (string.IsNullOrWhiteSpace(carModel) ||
+            carModel.Equals("Assetto Corsa Competizione", StringComparison.OrdinalIgnoreCase) ||
+            carModel.Contains("Lobby", StringComparison.OrdinalIgnoreCase))
         {
-            var fallback = await ScanExistingSetupsAsync(force: true, ct);
-            if (fallback != null)
-            {
-                SetupDetected?.Invoke(fallback);
-            }
-            return fallback;
+            // Do NOT scan or return any setup when car is unknown or in lobby
+            return null;
         }
 
         try
         {
-            var dirInfo = new DirectoryInfo(_watchDirectory);
+            var candidateRoots = new List<string> { _watchDirectory };
+            candidateRoots.AddRange(FindAccSetupsCandidates());
+
+            DirectoryInfo? targetSearchDir = null;
             string normCar = carModel.Replace("_", "").Replace(" ", "").ToLowerInvariant();
 
-            // Find car folder (e.g. bentley_continental_gt3_2018)
-            var carDir = dirInfo.GetDirectories()
-                .FirstOrDefault(d =>
-                {
-                    string dNorm = d.Name.Replace("_", "").Replace(" ", "").ToLowerInvariant();
-                    return dNorm.Contains(normCar) || normCar.Contains(dNorm);
-                });
-
-            if (carDir == null)
+            foreach (var root in candidateRoots.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                var fallback = await ScanExistingSetupsAsync(force: true, ct);
-                if (fallback != null)
-                {
-                    SetupDetected?.Invoke(fallback);
-                }
-                return fallback;
-            }
+                if (!Directory.Exists(root)) continue;
+                var rootDir = new DirectoryInfo(root);
 
-            // Find track folder (e.g. Spa)
-            DirectoryInfo? trackDir = null;
-            if (!string.IsNullOrWhiteSpace(track))
-            {
-                string normTrk = track.Replace("_", "").Replace(" ", "").ToLowerInvariant();
-                trackDir = carDir.GetDirectories()
+                var carDir = rootDir.GetDirectories()
                     .FirstOrDefault(d =>
                     {
                         string dNorm = d.Name.Replace("_", "").Replace(" ", "").ToLowerInvariant();
-                        return dNorm.Contains(normTrk) || normTrk.Contains(dNorm);
+                        return dNorm.Contains(normCar) || normCar.Contains(dNorm);
                     });
+
+                if (carDir != null)
+                {
+                    DirectoryInfo? trackDir = null;
+                    if (!string.IsNullOrWhiteSpace(track))
+                    {
+                        string normTrk = track.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+                        trackDir = carDir.GetDirectories()
+                            .FirstOrDefault(d =>
+                            {
+                                string dNorm = d.Name.Replace("_", "").Replace(" ", "").ToLowerInvariant();
+                                return dNorm.Contains(normTrk) || normTrk.Contains(dNorm);
+                            });
+                    }
+
+                    targetSearchDir = trackDir ?? carDir;
+
+                    if (!string.Equals(root, _watchDirectory, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SetDirectory(root);
+                    }
+                    break;
+                }
             }
 
-            var searchDir = trackDir ?? carDir;
-            var jsonFiles = searchDir.GetFiles("*.json", SearchOption.AllDirectories)
+            if (targetSearchDir == null || !targetSearchDir.Exists)
+            {
+                // Car/track folder not found. Do NOT fall back to other cars' setups!
+                return null;
+            }
+
+            var jsonFiles = targetSearchDir.GetFiles("*.json", SearchOption.AllDirectories)
                 .OrderByDescending(f => f.LastWriteTimeUtc)
                 .ToList();
 
             if (jsonFiles.Count == 0)
             {
-                var fallback = await ScanExistingSetupsAsync(force: true, ct);
-                if (fallback != null)
-                {
-                    SetupDetected?.Invoke(fallback);
-                }
-                return fallback;
+                return null;
             }
 
-            var newest = jsonFiles[0];
-            var active = jsonFiles.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
-            var target = (active != null && (newest.FullName.Equals(active.FullName, StringComparison.OrdinalIgnoreCase) || Math.Abs((newest.LastWriteTimeUtc - active.LastWriteTimeUtc).TotalSeconds) <= 3))
-                ? active
-                : newest;
+            FileInfo? chosenFile = null;
+            bool isLiveMatched = false;
 
-            var payload = await ProcessSetupFileAsync(target.FullName, force: true, ct);
+            // Live telemetry matching: evaluate candidates against in-car physics & graphics state
+            if (liveContext.HasValue && (liveContext.Value.Fuel > 0 || liveContext.Value.Tc > 0))
+            {
+                var ctx = liveContext.Value;
+                int bestScore = -1;
+                FileInfo? bestScoredFile = null;
+
+                foreach (var file in jsonFiles)
+                {
+                    try
+                    {
+                        await using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                        int score = CalculateSetupMatchScore(doc.RootElement, ctx);
+
+                        // Small preference for user-saved named files over generic Active.json if scores match
+                        bool isGenericActive = file.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase);
+                        if (!isGenericActive && score > 0)
+                        {
+                            score += 2;
+                        }
+
+                        if (score > bestScore)
+                        {
+                            bestScore = score;
+                            bestScoredFile = file;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (bestScore >= 50 && bestScoredFile != null)
+                {
+                    chosenFile = bestScoredFile;
+                    isLiveMatched = true;
+                }
+            }
+
+            // Fallback if no live match: use most recently written Active.json or newest file in this folder
+            if (chosenFile == null)
+            {
+                var newest = jsonFiles[0];
+                var active = jsonFiles.FirstOrDefault(f => f.Name.Equals("Active.json", StringComparison.OrdinalIgnoreCase));
+                chosenFile = (active != null && (newest.FullName.Equals(active.FullName, StringComparison.OrdinalIgnoreCase) || Math.Abs((newest.LastWriteTimeUtc - active.LastWriteTimeUtc).TotalSeconds) <= 3))
+                    ? active
+                    : newest;
+            }
+
+            var payload = await ProcessSetupFileAsync(chosenFile.FullName, force: true, ct: ct);
             if (payload != null)
             {
+                payload.IsLiveMatched = isLiveMatched;
                 SetupDetected?.Invoke(payload);
             }
             return payload;
@@ -364,6 +387,60 @@ public sealed class SetupWatcherService : ISetupWatcher
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Scores a setup JSON against live telemetry (fuel level, TC, ABS, engine map, static camber).
+    /// </summary>
+    public static int CalculateSetupMatchScore(JsonElement root, in LiveCarSetupContext ctx)
+    {
+        int score = 0;
+        if (!root.TryGetProperty("basicSetup", out var basic)) return 0;
+
+        // 1. Strategy Fuel matching (crucial setup discriminator)
+        if (ctx.Fuel > 0 && basic.TryGetProperty("strategy", out var strategy) && strategy.TryGetProperty("fuel", out var fuelProp))
+        {
+            float setupFuel = fuelProp.GetSingle();
+            float diff = Math.Abs(setupFuel - ctx.Fuel);
+            if (diff <= 0.6f) score += 40;
+            else if (diff <= 1.5f) score += 25;
+            else if (diff <= 3.0f) score += 10;
+        }
+
+        // 2. Electronics: TC1, ABS, EngineMap
+        if (basic.TryGetProperty("electronics", out var electronics))
+        {
+            if (ctx.Tc > 0 && electronics.TryGetProperty("tC1", out var tcProp) && tcProp.GetInt32() == ctx.Tc)
+            {
+                score += 20;
+            }
+            if (ctx.Abs > 0 && electronics.TryGetProperty("abs", out var absProp) && absProp.GetInt32() == ctx.Abs)
+            {
+                score += 15;
+            }
+            if (ctx.EngineMap >= 0 && electronics.TryGetProperty("eCUMap", out var mapProp) && mapProp.GetInt32() == ctx.EngineMap)
+            {
+                score += 10;
+            }
+        }
+
+        // 3. Static Camber matching (exact radians from Kunos physics engine)
+        if (ctx.CamberRad != null && ctx.CamberRad.Length >= 4 && basic.TryGetProperty("alignment", out var alignment) && alignment.TryGetProperty("staticCamber", out var camberProp) && camberProp.ValueKind == JsonValueKind.Array)
+        {
+            var camberArr = camberProp.EnumerateArray().Select(x => x.GetSingle()).ToArray();
+            if (camberArr.Length >= 4)
+            {
+                float maxDiff = 0f;
+                for (int i = 0; i < 4; i++)
+                {
+                    maxDiff = Math.Max(maxDiff, Math.Abs(camberArr[i] - ctx.CamberRad[i]));
+                }
+                if (maxDiff <= 0.005f) score += 25;
+                else if (maxDiff <= 0.02f) score += 15;
+            }
+        }
+
+        return score;
     }
 
     private void OnFileEvent(object sender, FileSystemEventArgs e)

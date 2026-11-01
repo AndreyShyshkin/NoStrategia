@@ -48,6 +48,7 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
     private string _lastQueriedTrack = string.Empty;
     private GameSessionPhase _lastQueriedPhase = GameSessionPhase.Unknown;
     private readonly System.Diagnostics.Stopwatch _statusBroadcastStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    private readonly System.Diagnostics.Stopwatch _garageSetupCheckStopwatch = System.Diagnostics.Stopwatch.StartNew();
     private GameSessionPhase _lastBroadcastPhase = GameSessionPhase.Unknown;
     private GameLinkState _lastBroadcastLink = GameLinkState.Searching;
     private AgentState _lastBroadcastState = AgentState.Stopped;
@@ -61,7 +62,29 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
     public event Action<TelemetryPayload>? FrameDispatched;
     public event Action<SetupPayload>? SetupSynced;
 
-    public Task<SetupPayload?> RefreshSetupsAsync() => _setupWatcher.ScanExistingSetupsAsync();
+    public Task<SetupPayload?> RefreshSetupsAsync()
+    {
+        lock (_statusLock)
+        {
+            if (_status.SessionPhase is GameSessionPhase.InGarageSetup or GameSessionPhase.InPitLane or GameSessionPhase.LiveOnTrack &&
+                !string.IsNullOrEmpty(_status.CurrentCarModel) &&
+                !_status.CurrentCarModel.Equals("Assetto Corsa Competizione", StringComparison.OrdinalIgnoreCase))
+            {
+                _reader.TryReadPhysics(out var phys);
+                _reader.TryReadGraphics(out var graph);
+                var ctx = new LiveCarSetupContext(
+                    Fuel: phys.Fuel,
+                    Tc: graph.TC > 0 ? graph.TC : (int)phys.TC,
+                    Abs: graph.ABS > 0 ? graph.ABS : (int)phys.Abs,
+                    EngineMap: graph.EngineMap,
+                    CamberRad: phys.CamberRAD,
+                    InGarage: true
+                );
+                return _setupWatcher.TryLoadSetupForCarAndTrackAsync(_status.CurrentCarModel, _status.CurrentTrack, ctx, force: true);
+            }
+        }
+        return Task.FromResult<SetupPayload?>(null);
+    }
 
     public TelemetryAgentCoordinator(
         AgentConfiguration? configuration = null,
@@ -194,11 +217,15 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
                         {
                             s.GameLink = GameLinkState.Connected;
                             s.SessionPhase = GameSessionPhase.InLobbyOrMenu;
+                            s.LastSyncedSetupName = string.Empty;
+                            s.LastSyncedSetupTime = null;
                         }
                         else
                         {
                             s.GameLink = GameLinkState.Searching;
                             s.SessionPhase = GameSessionPhase.Unknown;
+                            s.LastSyncedSetupName = string.Empty;
+                            s.LastSyncedSetupTime = null;
                         }
                     });
                     continue;
@@ -206,34 +233,80 @@ public sealed class TelemetryAgentCoordinator : IAsyncDisposable
 
                 var phase = DeterminePhase(in graphics);
 
+                // If in Lobby or Menu, clear setups and idle briefly (do not sync setups)
+                if (phase == GameSessionPhase.InLobbyOrMenu)
+                {
+                    _lastQueriedCar = string.Empty;
+                    _lastQueriedTrack = string.Empty;
+                    _lastQueriedPhase = phase;
+
+                    bool isGameProc = _config.DataSource == DataSourceType.LiveMemory && IsAccProcessRunning();
+                    UpdateStatus(s =>
+                    {
+                        s.State = AgentState.StandbyHeartbeat;
+                        s.GameLink = isGameProc ? GameLinkState.Connected : (_config.DataSource == DataSourceType.LiveMemory ? GameLinkState.Searching : GameLinkState.MockEmulation);
+                        s.SessionPhase = GameSessionPhase.InLobbyOrMenu;
+                        s.CurrentCarModel = "Assetto Corsa Competizione";
+                        s.CurrentTrack = "Main Menu / Lobby";
+                        s.LastSyncedSetupName = string.Empty;
+                        s.LastSyncedSetupTime = null;
+                        s.CurrentHz = 0;
+                    });
+                    await Task.Delay(150, ct);
+                    continue;
+                }
+
                 // Read Static data to know current car and track
                 _reader.TryReadStatic(out var staticData);
                 string car = !string.IsNullOrWhiteSpace(staticData.CarModel) ? staticData.CarModel : _status.CurrentCarModel;
                 string trk = !string.IsNullOrWhiteSpace(staticData.Track) ? staticData.Track : _status.CurrentTrack;
 
-                // Auto-query setups watcher when entering track, pitlane or garage, or if car/track changed
-                bool enteringSessionOrTrack = (phase == GameSessionPhase.LiveOnTrack && _lastQueriedPhase != GameSessionPhase.LiveOnTrack) ||
+                // Always read Physics for live input monitoring & setup evaluation
+                _reader.TryReadPhysics(out var physics);
+                float steerDegrees = physics.SteerAngle * (180.0f / MathF.PI);
+
+                // Auto-query setups watcher when entering track, pitlane or garage, or if car/track changed, or periodic garage re-check
+                bool sessionEntered = (_lastQueriedPhase == GameSessionPhase.InLobbyOrMenu || _lastQueriedPhase == GameSessionPhase.Unknown);
+                bool enteringSessionOrTrack = sessionEntered ||
+                                              (phase == GameSessionPhase.LiveOnTrack && _lastQueriedPhase != GameSessionPhase.LiveOnTrack) ||
                                               (phase == GameSessionPhase.InGarageSetup && _lastQueriedPhase != GameSessionPhase.InGarageSetup) ||
                                               (phase == GameSessionPhase.InPitLane && _lastQueriedPhase == GameSessionPhase.InLobbyOrMenu);
 
                 bool carOrTrackChanged = (!string.IsNullOrEmpty(car) && car != _lastQueriedCar) ||
                                          (!string.IsNullOrEmpty(trk) && trk != _lastQueriedTrack);
 
-                if (carOrTrackChanged || enteringSessionOrTrack)
+                bool inGarageOrPit = phase == GameSessionPhase.InGarageSetup || phase == GameSessionPhase.InPitLane;
+                bool periodicGarageCheck = inGarageOrPit && _garageSetupCheckStopwatch.ElapsedMilliseconds >= 1200;
+
+                if (!string.IsNullOrEmpty(car) && !car.Equals("Assetto Corsa Competizione", StringComparison.OrdinalIgnoreCase))
                 {
-                    _lastQueriedCar = car;
-                    _lastQueriedTrack = trk;
-                    _lastQueriedPhase = phase;
-                    _ = _setupWatcher.TryLoadSetupForCarAndTrackAsync(car, trk);
+                    if (carOrTrackChanged || enteringSessionOrTrack || periodicGarageCheck)
+                    {
+                        if (periodicGarageCheck) _garageSetupCheckStopwatch.Restart();
+                        _lastQueriedCar = car;
+                        _lastQueriedTrack = trk;
+                        _lastQueriedPhase = phase;
+
+                        var liveCtx = new LiveCarSetupContext(
+                            Fuel: physics.Fuel,
+                            Tc: graphics.TC > 0 ? graphics.TC : (int)physics.TC,
+                            Abs: graphics.ABS > 0 ? graphics.ABS : (int)physics.Abs,
+                            EngineMap: graphics.EngineMap,
+                            CamberRad: physics.CamberRAD,
+                            InGarage: inGarageOrPit
+                        );
+
+                        _ = _setupWatcher.TryLoadSetupForCarAndTrackAsync(car, trk, liveCtx);
+                    }
+                    else
+                    {
+                        _lastQueriedPhase = phase;
+                    }
                 }
                 else
                 {
                     _lastQueriedPhase = phase;
                 }
-
-                // Always read Physics for live input monitoring (steer angle, pedals)
-                _reader.TryReadPhysics(out var physics);
-                float steerDegrees = physics.SteerAngle * (180.0f / MathF.PI);
 
                 // 3. Adaptive Throttling
                 bool transmit = _throttlePolicy.ShouldTransmit(

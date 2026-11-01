@@ -22,4 +22,7 @@ public sealed class SetupPayload
 
     [JsonPropertyName("setupData")]
     public JsonElement SetupData { get; set; }
+
+    [JsonPropertyName("isLiveMatched")]
+    public bool IsLiveMatched { get; set; }
 }

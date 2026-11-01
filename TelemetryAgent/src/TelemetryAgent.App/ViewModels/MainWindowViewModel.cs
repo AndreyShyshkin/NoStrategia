@@ -36,9 +36,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private string _packetsCounterText = "Sent: 0 | Dropped: 0";
 
     // 4. Setup Interceptor
-    private string _setupWatcherBadge = "ACTIVE";
-    private string _lastSetupSynced = "None (Watching Documents/ACC/Setups)";
-    private string _lastSetupHash = "--";
+    private string _setupWatcherBadge = "STANDBY";
+    private string _lastSetupSynced = "None (Waiting for Track Session)";
+    private string _lastSetupHash = "Setup will sync on track entry";
     private string _watchDirectoryText = "Scanning Setups...";
 
     // Live Mini-HUD
@@ -179,7 +179,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _coordinator.SetupSynced += OnSetupSynced;
 
         _ = _coordinator.StartAsync();
-        _ = RefreshSetupsAsync();
     }
 
     private void OnCoordinatorStatusChanged(AgentStatus status)
@@ -313,8 +312,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             {
                 LastSetupSynced = status.LastSyncedSetupName;
                 LastSetupHash = status.LastSyncedSetupTime.HasValue
-                    ? $"Synced at {status.LastSyncedSetupTime.Value:HH:mm:ss}"
-                    : "--";
+                    ? $"Active Setup • Synced at {status.LastSyncedSetupTime.Value:HH:mm:ss}"
+                    : "Active Setup";
+                SetupWatcherBadge = "ACTIVE";
+            }
+            else
+            {
+                SetupWatcherBadge = "STANDBY";
+                LastSetupSynced = "None (Waiting for Track Session)";
+                LastSetupHash = "Setup will sync on track entry";
             }
         });
     }
@@ -426,8 +432,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             string displayName = !string.IsNullOrEmpty(s.Track) ? $"{s.Track} / {s.FileName}" : s.FileName;
             LastSetupSynced = displayName;
             string shortHash = s.Hash.Length >= 12 ? s.Hash[..12] : s.Hash;
-            LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
-            FeedbackMessage = $"Setup synced: {displayName}";
+            LastSetupHash = $"SHA-256: {shortHash}... (Active Setup)";
+            SetupWatcherBadge = "ACTIVE";
+            FeedbackMessage = $"Active setup loaded: {displayName}";
         });
     }
 
@@ -529,19 +536,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public async Task RefreshSetupsAsync()
     {
-        FeedbackMessage = "Scanning for ACC setups...";
+        FeedbackMessage = "Scanning for active ACC setup...";
         var found = await _coordinator.RefreshSetupsAsync();
         if (found != null)
         {
             string displayName = !string.IsNullOrEmpty(found.Track) ? $"{found.Track} / {found.FileName}" : found.FileName;
             LastSetupSynced = displayName;
             string shortHash = found.Hash.Length >= 12 ? found.Hash[..12] : found.Hash;
-            LastSetupHash = $"SHA-256: {shortHash}... (Synced)";
-            FeedbackMessage = $"Found & synced setup: {displayName}";
+            LastSetupHash = $"SHA-256: {shortHash}... (Active Setup)";
+            SetupWatcherBadge = "ACTIVE";
+            FeedbackMessage = $"Active setup loaded: {displayName}";
         }
         else
         {
-            FeedbackMessage = $"No setup found in {_coordinator.SetupWatcher.WatchDirectory}";
+            if (_coordinator.CurrentStatus.SessionPhase == GameSessionPhase.InLobbyOrMenu)
+            {
+                FeedbackMessage = "In lobby: setups will auto-detect when entering track session.";
+            }
+            else
+            {
+                FeedbackMessage = $"No setup found for {_coordinator.CurrentStatus.CurrentCarModel} @ {_coordinator.CurrentStatus.CurrentTrack}";
+            }
         }
     }
 
