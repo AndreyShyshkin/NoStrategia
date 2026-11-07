@@ -9,6 +9,9 @@ export class RedisTelemetryConsumer {
   private consumerName: string;
   private onTelemetryCallback: ((packet: FastTelemetryPacket) => void) | null = null;
   private isRunning: boolean = false;
+  private lastKnownCarModel: string = "Waiting for Car...";
+  private lastKnownTrack: string = "Waiting for Track...";
+  private lastKnownSessionId: string = "Waiting for Session...";
 
   constructor(
     redisAddr: string = process.env.REDIS_ADDR || "127.0.0.1:6379",
@@ -31,7 +34,7 @@ export class RedisTelemetryConsumer {
         lazyConnect: true,
         maxRetriesPerRequest: 1,
         retryStrategy: (times) => {
-          if (times > 3) return null; // stop reconnect spam if Redis is not running
+          if (times > 5) return 5000;
           return 2000;
         },
       });
@@ -40,14 +43,12 @@ export class RedisTelemetryConsumer {
         this.isConnected = true;
         console.log(`[RedisConsumer] Connected to Redis at ${redisAddr}`);
         this.ensureConsumerGroup();
+        this.fetchLatestKnownPacket();
       });
 
       this.redis.on("error", (err) => {
         this.isConnected = false;
-        // Keep quiet on connection refusal in development
-        if (err.message.includes("ECONNREFUSED")) {
-          // Expected when Redis container is not running
-        } else {
+        if (!err.message.includes("ECONNREFUSED")) {
           console.warn(`[RedisConsumer] Redis status: ${err.message}`);
         }
       });
@@ -71,18 +72,43 @@ export class RedisTelemetryConsumer {
     return this.isConnected;
   }
 
+  public getMetadata(): { carModel: string; track: string; sessionId: string } {
+    return {
+      carModel: this.lastKnownCarModel,
+      track: this.lastKnownTrack,
+      sessionId: this.lastKnownSessionId,
+    };
+  }
+
   private async ensureConsumerGroup() {
     if (!this.redis) return;
     try {
-      // MKSTREAM creates the stream if not existing yet
       await this.redis.xgroup("CREATE", this.streamName, this.consumerGroup, "$", "MKSTREAM");
-      console.log(`[RedisConsumer] Created consumer group ${this.consumerGroup} on ${this.streamName}`);
+      console.log(`[RedisConsumer] Group ${this.consumerGroup} ready on ${this.streamName}`);
     } catch (err: any) {
       if (err.message && err.message.includes("BUSYGROUP")) {
-        // Group already exists, which is normal
+        // Group already exists, standard
       } else {
         console.warn(`[RedisConsumer] xgroup create notice: ${err.message}`);
       }
+    }
+  }
+
+  private async fetchLatestKnownPacket() {
+    if (!this.redis) return;
+    try {
+      const res = await this.redis.xrevrange(this.streamName, "+", "-", "COUNT", 1);
+      if (res && res.length > 0) {
+        const [, fields] = res[0] as [string, string[]];
+        const packet = this.parseStreamFields(fields);
+        if (packet) {
+          if (packet.carModel && packet.carModel !== "unknown") this.lastKnownCarModel = packet.carModel;
+          if (packet.track && packet.track !== "unknown") this.lastKnownTrack = packet.track;
+          if (packet.sessionId) this.lastKnownSessionId = packet.sessionId;
+        }
+      }
+    } catch {
+      // Stream may be empty on cold start
     }
   }
 
@@ -102,20 +128,20 @@ export class RedisTelemetryConsumer {
   private async readLoop() {
     while (this.isRunning) {
       if (!this.isConnected || !this.redis) {
-        await new Promise((res) => setTimeout(res, 1000));
+        await new Promise((res) => setTimeout(res, 500));
         continue;
       }
 
       try {
-        // Read new messages with XREADGROUP (block up to 250ms)
+        // Read new messages with XREADGROUP (block up to 100ms for lowest latency)
         const response = await this.redis.xreadgroup(
           "GROUP",
           this.consumerGroup,
           this.consumerName,
           "COUNT",
-          "10",
+          "50",
           "BLOCK",
-          "250",
+          "100",
           "STREAMS",
           this.streamName,
           ">"
@@ -128,8 +154,14 @@ export class RedisTelemetryConsumer {
           for (const msg of messages) {
             const [id, fields] = msg;
             const parsed = this.parseStreamFields(fields);
-            if (parsed && this.onTelemetryCallback) {
-              this.onTelemetryCallback(parsed);
+            if (parsed) {
+              if (parsed.carModel && parsed.carModel !== "unknown") this.lastKnownCarModel = parsed.carModel;
+              if (parsed.track && parsed.track !== "unknown") this.lastKnownTrack = parsed.track;
+              if (parsed.sessionId) this.lastKnownSessionId = parsed.sessionId;
+
+              if (this.onTelemetryCallback) {
+                this.onTelemetryCallback(parsed);
+              }
             }
             // Auto-acknowledge
             await this.redis.xack(this.streamName, this.consumerGroup, id);
@@ -137,7 +169,7 @@ export class RedisTelemetryConsumer {
         }
       } catch (err: any) {
         if (!this.isRunning) break;
-        await new Promise((res) => setTimeout(res, 500));
+        await new Promise((res) => setTimeout(res, 200));
       }
     }
   }
@@ -150,63 +182,61 @@ export class RedisTelemetryConsumer {
       }
 
       // If payload was JSON stringified in field "data" or "payload"
-      if (map["payload"]) {
-        const raw = JSON.parse(map["payload"]);
-        return this.normalizePacket(raw);
-      }
       if (map["data"]) {
         const raw = JSON.parse(map["data"]);
-        return this.normalizePacket(raw);
+        return this.normalizePacket(raw, map);
+      }
+      if (map["payload"]) {
+        const raw = JSON.parse(map["payload"]);
+        return this.normalizePacket(raw, map);
       }
 
-      // Otherwise parse flattened Redis stream fields
-      return {
-        type: "FAST_PACKET",
-        timestamp: parseInt(map["timestamp"] || `${Date.now()}`, 10),
-        packetId: parseInt(map["packetId"] || "0", 10),
-        sessionId: map["sessionId"] || "default-session",
-        carModel: map["carModel"] || "mercedes_amg_gt3_evo",
-        track: map["track"] || "spa",
-        speed: parseFloat(map["speedKmh"] || map["speed"] || "0"),
-        gas: parseFloat(map["gas"] || "0"),
-        brake: parseFloat(map["brake"] || "0"),
-        steer: parseFloat(map["steerAngle"] || map["steer"] || "0"),
-        gear: parseInt(map["gear"] || "0", 10),
-        rpm: parseInt(map["rpm"] || "0", 10),
-        distNorm: parseFloat(map["distNorm"] || map["normalizedCarPosition"] || "0"),
-        currentSector: parseInt(map["currentSectorIndex"] || "0", 10),
-        lap: parseInt(map["completedLaps"] || map["lap"] || "1", 10),
-        latG: parseFloat(map["latG"] || "0"),
-        longG: parseFloat(map["longG"] || "0"),
-        yawRate: parseFloat(map["yawRate"] || "0"),
-        fuel: parseFloat(map["fuel"] || "50"),
-      };
+      // Otherwise parse flattened fields
+      return this.normalizePacket(map, map);
     } catch {
       return null;
     }
   }
 
-  private normalizePacket(raw: any): FastTelemetryPacket {
+  private normalizePacket(raw: any, fallbackMap: Record<string, string>): FastTelemetryPacket {
+    const timestamp = raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now();
+    const packetId = raw.packetId ?? parseInt(fallbackMap["packetId"] || "0", 10);
+    const speed = parseFloat((raw.speedKmh ?? raw.speed ?? fallbackMap["speed"] ?? 0).toFixed(1));
+    const gas = parseFloat((raw.gas ?? fallbackMap["gas"] ?? 0).toFixed(3));
+    const brake = parseFloat((raw.brake ?? fallbackMap["brake"] ?? 0).toFixed(3));
+    const steer = parseFloat((raw.steerAngle ?? raw.steer ?? fallbackMap["steerAngle"] ?? 0).toFixed(3));
+    const gear = raw.gear ?? parseInt(fallbackMap["gear"] || "0", 10);
+    const rpm = Math.round(raw.rpm ?? parseInt(fallbackMap["rpm"] || "0", 10));
+    const distNorm = parseFloat((raw.normalizedCarPosition ?? raw.distNorm ?? fallbackMap["distNorm"] ?? 0).toFixed(4));
+    const currentSector = raw.currentSectorIndex ?? raw.currentSector ?? 0;
+    const lap = raw.completedLaps ?? raw.lap ?? parseInt(fallbackMap["lap"] || "0", 10);
+
+    const latG = parseFloat((raw.latG ?? (raw.accG ? raw.accG[0] : fallbackMap["latG"]) ?? 0).toFixed(2));
+    const longG = parseFloat((raw.longG ?? (raw.accG ? raw.accG[1] : fallbackMap["longG"]) ?? 0).toFixed(2));
+    const yawRate = parseFloat((raw.yawRate ?? (raw.localAngularVel ? raw.localAngularVel[0] : fallbackMap["yawRate"]) ?? 0).toFixed(3));
+    const fuel = parseFloat((raw.fuel ?? fallbackMap["fuel"] ?? 50.0).toFixed(1));
+
     return {
       type: "FAST_PACKET",
-      timestamp: raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now(),
-      packetId: raw.packetId || 0,
-      sessionId: raw.sessionId || "live-session",
-      carModel: raw.carModel || "mercedes_amg_gt3_evo",
-      track: raw.track || "spa",
-      speed: raw.speedKmh ?? raw.speed ?? 0,
-      gas: raw.gas ?? 0,
-      brake: raw.brake ?? 0,
-      steer: raw.steerAngle ?? raw.steer ?? 0,
-      gear: raw.gear ?? 0,
-      rpm: raw.rpm ?? 0,
-      distNorm: raw.normalizedCarPosition ?? raw.distNorm ?? 0,
-      currentSector: raw.currentSectorIndex ?? raw.currentSector ?? 0,
-      lap: raw.completedLaps ?? raw.lap ?? 1,
-      latG: raw.latG ?? (raw.accG ? raw.accG[0] : 0),
-      longG: raw.longG ?? (raw.accG ? raw.accG[2] : 0),
-      yawRate: raw.yawRate ?? (raw.localAngularVel ? raw.localAngularVel[1] : 0),
-      fuel: raw.fuel ?? 50,
+      timestamp,
+      packetId,
+      sessionId: raw.sessionId || fallbackMap["sessionId"] || "live-session",
+      carModel: raw.carModel || fallbackMap["carModel"] || "mercedes_amg_gt3_evo",
+      track: raw.track || fallbackMap["track"] || "spa",
+      speed,
+      gas,
+      brake,
+      steer,
+      gear,
+      rpm,
+      distNorm,
+      currentSector,
+      lap,
+      latG,
+      longG,
+      yawRate,
+      fuel,
+      rawArray: [timestamp, packetId, distNorm, speed, gas, brake, steer, gear, rpm, yawRate, latG, longG],
     };
   }
 }

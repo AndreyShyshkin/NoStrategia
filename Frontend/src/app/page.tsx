@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
 import { useTelemetryWebSocket } from "../hooks/useTelemetryWebSocket";
 import { TelemetryCanvas } from "../components/telemetry/TelemetryCanvas";
 import { TelemetryGauges } from "../components/telemetry/TelemetryGauges";
 import { AudioEngineerWidget } from "../components/audio/AudioEngineerWidget";
 import { AudioRaceEngineer, AudioMessage } from "../services/AudioRaceEngineer";
 import { TacticalEvent, AudioPriority } from "../types/telemetry";
-import { Wifi, WifiOff, Car, MapPin, Radio, Terminal, Settings2, RefreshCw } from "lucide-react";
+import { Wifi, WifiOff, Car, MapPin, Radio, Terminal, Settings2, RefreshCw, Play, Square } from "lucide-react";
 
 export default function TelemetryDashboard() {
   const [audioEngineerInstance] = useState(() => new AudioRaceEngineer());
@@ -33,11 +33,17 @@ export default function TelemetryDashboard() {
     isConnected,
     isConnecting,
     serverStatus,
+    streamSource,
+    isLive,
+    carModel,
+    track,
+    simulationEnabled,
     lastPing,
     buffers,
     connect,
     disconnect,
     sendEvent,
+    toggleSimulation,
   } = useTelemetryWebSocket({
     url: customWsUrl,
     bufferCapacity: 1200,
@@ -46,7 +52,6 @@ export default function TelemetryDashboard() {
   });
 
   const handleManualTrigger = (text: string, priority: AudioPriority) => {
-    // Send event both to WebSocket server so all clients receive it and trigger local audio
     sendEvent(text, priority);
     audioEngineerInstance.postCallout(text, priority);
 
@@ -77,19 +82,23 @@ export default function TelemetryDashboard() {
                   Telemetry 60 FPS
                 </span>
               </div>
-              <p className="text-xs text-gray-400">Course Work Theme #9 • Assetto Corsa Competizione Platform</p>
+              <p className="text-xs text-gray-400">Assetto Corsa Competizione High-Performance Telemetry Platform</p>
             </div>
           </div>
 
-          {/* Car & Track Status Badges */}
+          {/* Car & Track Status Badges (Dynamic from Agent) */}
           <div className="hidden sm:flex items-center gap-2 text-xs font-mono">
             <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/50 px-2.5 py-1 text-gray-300">
               <Car className="h-3.5 w-3.5 text-cyan-400" />
-              <span>Mercedes-AMG GT3 Evo</span>
+              <span className={carModel.startsWith("Waiting") ? "text-gray-500 italic" : "text-gray-200 font-bold"}>
+                {carModel}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/50 px-2.5 py-1 text-gray-300">
               <MapPin className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Spa-Francorchamps (7.004 km)</span>
+              <span className={track.startsWith("Waiting") ? "text-gray-500 italic" : "text-gray-200 font-bold"}>
+                {track}
+              </span>
             </div>
           </div>
 
@@ -98,16 +107,38 @@ export default function TelemetryDashboard() {
             <div className="flex items-center gap-2 rounded-lg border border-gray-800 bg-black/60 px-2.5 py-1 text-xs font-mono">
               <span className="relative flex h-2 w-2">
                 {isConnected && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                  <span
+                    className={`absolute inline-flex h-full w-full animate-ping rounded-full ${
+                      isLive ? "bg-emerald-400" : "bg-amber-400"
+                    } opacity-75`}
+                  ></span>
                 )}
                 <span
                   className={`relative inline-flex h-2 w-2 rounded-full ${
-                    isConnected ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500"
+                    !isConnected
+                      ? "bg-rose-500"
+                      : isLive
+                      ? "bg-emerald-500"
+                      : "bg-amber-500"
                   }`}
                 />
               </span>
-              <span className={isConnected ? "text-emerald-400" : isConnecting ? "text-amber-400" : "text-rose-400"}>
-                {serverStatus}
+              <span
+                className={
+                  !isConnected
+                    ? "text-rose-400"
+                    : isLive
+                    ? "text-emerald-400 font-semibold"
+                    : "text-amber-400"
+                }
+              >
+                {!isConnected
+                  ? "Disconnected"
+                  : isLive
+                  ? "Live Agent Feed (ACC Session)"
+                  : streamSource === "simulator"
+                  ? "Simulator Active"
+                  : "Standby: Waiting for Agent"}
               </span>
               {isConnected && lastPing > 0 && (
                 <span className="text-gray-500 text-[11px]">({lastPing}ms)</span>
@@ -136,27 +167,45 @@ export default function TelemetryDashboard() {
           </div>
         </div>
 
-        {/* Optional Connection Settings Drawer */}
+        {/* Optional Connection & Simulation Settings Drawer */}
         {showSettings && (
-          <div className="mx-auto mt-2.5 max-w-7xl rounded-lg border border-gray-800 bg-black/80 p-3 text-xs font-mono">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-gray-400">WebSocket Endpoint:</span>
-              <input
-                type="text"
-                value={customWsUrl}
-                onChange={(e) => setCustomWsUrl(e.target.value)}
-                className="w-72 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-cyan-300 focus:outline-none focus:border-cyan-500"
-              />
-              <button
-                onClick={() => {
-                  disconnect();
-                  setTimeout(() => connect(), 200);
-                }}
-                className="flex items-center gap-1 rounded bg-cyan-600 px-2 py-1 text-white hover:bg-cyan-500 transition"
-              >
-                <RefreshCw className="h-3 w-3" />
-                Reconnect
-              </button>
+          <div className="mx-auto mt-2.5 max-w-7xl rounded-lg border border-gray-800 bg-black/90 p-3 text-xs font-mono shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-gray-400">WebSocket Endpoint:</span>
+                <input
+                  type="text"
+                  value={customWsUrl}
+                  onChange={(e) => setCustomWsUrl(e.target.value)}
+                  className="w-72 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-cyan-300 focus:outline-none focus:border-cyan-500"
+                />
+                <button
+                  onClick={() => {
+                    disconnect();
+                    setTimeout(() => connect(), 200);
+                  }}
+                  className="flex items-center gap-1 rounded bg-cyan-600 px-2.5 py-1 text-white hover:bg-cyan-500 transition"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Reconnect
+                </button>
+              </div>
+
+              {/* Simulation Mode Toggle (OFF by default: strictly waits for real TelemetryAgent) */}
+              <div className="flex items-center gap-3 border-t sm:border-t-0 sm:border-l border-gray-800 pt-2 sm:pt-0 sm:pl-4">
+                <span className="text-gray-400">Offline Simulation Mode:</span>
+                <button
+                  onClick={() => toggleSimulation(!simulationEnabled)}
+                  className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-semibold transition ${
+                    simulationEnabled
+                      ? "bg-purple-600 text-white hover:bg-purple-500"
+                      : "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700"
+                  }`}
+                >
+                  {simulationEnabled ? <Square className="h-3 w-3 fill-current" /> : <Play className="h-3 w-3 fill-current" />}
+                  {simulationEnabled ? "Stop Demo (Wait for Agent)" : "Start Demo Simulator"}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -166,12 +215,18 @@ export default function TelemetryDashboard() {
       <main className="mx-auto w-full max-w-7xl flex-1 space-y-4 p-4">
         {/* HUD Instantaneous Gauges */}
         <section>
-          <TelemetryGauges buffers={buffers} />
+          <TelemetryGauges buffers={buffers} isLive={isLive} />
         </section>
 
         {/* 60 FPS Uncontrolled Canvas Live Charts */}
         <section>
-          <TelemetryCanvas buffers={buffers} height={380} showFps={true} />
+          <TelemetryCanvas
+            buffers={buffers}
+            height={380}
+            showFps={true}
+            isLive={isLive}
+            streamSource={streamSource}
+          />
         </section>
 
         {/* Audio Race Engineer Subsystem & Controls */}
@@ -186,7 +241,7 @@ export default function TelemetryDashboard() {
 
       {/* 3. Footer */}
       <footer className="border-t border-gray-900 bg-[#0a0c10] px-4 py-3 text-center text-xs font-mono text-gray-600">
-        NoStrategia • High-Throughput Ingestion, 60 FPS Canvas Streaming & Web Speech Audio Engine • 2026
+        NoStrategia • Edge Agent Ingestion & Redis Stream Pipeline • 60 FPS Canvas & Web Speech Engine
       </footer>
     </div>
   );

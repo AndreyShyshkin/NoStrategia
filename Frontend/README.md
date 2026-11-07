@@ -23,7 +23,7 @@ WebSocket (60-100 Hz) ──► Float32Array (useRef) ──► requestAnimation
 2. **Незалежний Render Loop (60 FPS Canvas):**  
    Окремий цикл `requestAnimationFrame()` вичитує останні точки з кільцевого буфера та малює графіки у бітовий растр HTML5 Canvas без участі React Reconciliation.
 3. **Двосторонній WebSocket шлюз (`/ws/stream`):**  
-   Шлюз на базі `ws` підтримує мультиплексування каналів (`telemetry:fast`, `strategy:tactics`), автоматичне підключення до Redis Streams (`stream:telemetry:raw`) та вбудований симулятор телеметрії траси Spa-Francorchamps для тестування та академічного захисту.
+   Шлюз на базі `ws` підтримує мультиплексування каналів (`telemetry:fast`, `strategy:tactics`), автоматичне підключення до Redis Streams (`stream:telemetry:raw`) з очікуванням запуску реального `TelemetryAgent`. За замовчуванням шлюз знаходиться у режимі очікування сесії гри (Standby), а при виїзді боліда на трасу транслює живий потік на частоті 60–100 Гц. Для автономної перевірки доступний опціональний демо-симулятор.
 4. **Аудіо-інженер на базі Web Speech API:**  
    Голосовий супровід гоночного інженера з 4-рівневою пріоритетною чергою (P1 Critical, P2 Strategy, P3 Telemetry, P4 Status), дедуплікацією фраз та імітацією радіо-переговорів.
 

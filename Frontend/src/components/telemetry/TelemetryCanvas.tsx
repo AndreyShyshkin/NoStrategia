@@ -9,6 +9,8 @@ interface TelemetryCanvasProps {
   height?: number;
   showFps?: boolean;
   className?: string;
+  isLive?: boolean;
+  streamSource?: "agent" | "waiting_for_agent" | "simulator";
 }
 
 interface HoverInspectionData {
@@ -27,6 +29,8 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
   height = 420,
   showFps = true,
   className = "",
+  isLive = false,
+  streamSource = "waiting_for_agent",
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -215,15 +219,27 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="relative flex h-3 w-3">
-              <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${isPaused ? "bg-amber-400" : "bg-emerald-400"} opacity-75`}></span>
-              <span className={`relative inline-flex h-3 w-3 rounded-full ${isPaused ? "bg-amber-500" : "bg-emerald-500"}`}></span>
+              <span
+                className={`absolute inline-flex h-full w-full animate-ping rounded-full ${
+                  isLive ? "bg-emerald-400" : isPaused ? "bg-amber-400" : "bg-yellow-400"
+                } opacity-75`}
+              ></span>
+              <span
+                className={`relative inline-flex h-3 w-3 rounded-full ${
+                  isLive ? "bg-emerald-500" : isPaused ? "bg-amber-500" : "bg-yellow-500"
+                }`}
+              ></span>
             </span>
             <h2 className="text-sm font-semibold tracking-wider text-gray-200 uppercase">
-              Live Telemetry Stream (60 Hz Canvas)
+              {isLive
+                ? "Live Telemetry Stream (60 Hz Canvas)"
+                : streamSource === "simulator"
+                ? "Demo Simulation (60 Hz Canvas)"
+                : "Awaiting Telemetry Agent (In Lobby / Standby)"}
             </h2>
           </div>
 
-          {showFps && (
+          {showFps && isLive && (
             <div className="flex items-center gap-2 rounded bg-black/60 px-2 py-0.5 text-xs font-mono text-gray-300 border border-gray-800">
               <span className="text-gray-400">FPS:</span>
               <span className={`font-bold ${fps >= 55 ? "text-emerald-400" : fps >= 30 ? "text-amber-400" : "text-rose-400"}`}>
@@ -311,6 +327,24 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
           onMouseLeave={handleMouseLeave}
           className="block w-full"
         />
+
+        {/* Standby / Waiting for Agent Overlay */}
+        {!isLive && !isPaused && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px]">
+            <div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-950/60 px-4 py-1.5 text-xs font-mono text-amber-300 shadow-xl">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+              </span>
+              <span className="font-semibold tracking-wider uppercase">
+                Awaiting Telemetry Agent / Track Session
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] font-mono text-gray-400">
+              Start Assetto Corsa Competizione and drive out of pit lane to stream live telemetry
+            </p>
+          </div>
+        )}
 
         {/* Hover Crosshair Overlay */}
         {hoverData && (

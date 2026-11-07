@@ -8,6 +8,7 @@ import { AudioPriority } from "../src/types/telemetry.js";
 test("WebSocket Gateway & HTTP Health Endpoint E2E Test", async (t) => {
   const TEST_PORT = 4099;
   const gateway = new TelemetryWebSocketGateway(TEST_PORT);
+  gateway.setSimulationMode(true); // Enable simulation explicitly for automated test
   await gateway.start();
 
   t.after(() => {

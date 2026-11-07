@@ -6,9 +6,10 @@ import { Gauge, Activity, Fuel, Compass, Flag } from "lucide-react";
 
 interface TelemetryGaugesProps {
   buffers: TelemetryBuffers;
+  isLive?: boolean;
 }
 
-export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers }) => {
+export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLive = false }) => {
   // We read latest metrics at an interval (~15-20Hz) to update DOM badges without choking React
   const [metrics, setMetrics] = useState({
     speed: 0,
@@ -27,6 +28,21 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers }) => 
 
   useEffect(() => {
     const timer = setInterval(() => {
+      if (!isLive) {
+        setMetrics((prev) => ({
+          ...prev,
+          speed: 0,
+          gas: 0,
+          brake: 0,
+          steer: 0,
+          gear: 0,
+          rpm: 0,
+          latG: 0,
+          longG: 0,
+        }));
+        return;
+      }
+
       const latest = buffers.latestPacket.current;
       if (latest) {
         setMetrics({
@@ -44,10 +60,10 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers }) => 
           longG: latest.longG,
         });
       }
-    }, 50); // 20 FPS UI DOM poll is optimal for CPU while Canvas does the heavy 60 FPS lift
+    }, 50);
 
     return () => clearInterval(timer);
-  }, [buffers]);
+  }, [buffers, isLive]);
 
   const rpmPercent = Math.min(100, Math.max(0, (metrics.rpm / 8500) * 100));
   const isShiftWarning = metrics.rpm > 7300;

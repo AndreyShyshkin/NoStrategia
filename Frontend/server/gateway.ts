@@ -7,6 +7,7 @@ import {
   TacticalEvent,
   WebSocketClientMessage,
   WebSocketServerMessage,
+  GatewayStatusMessage,
   AudioPriority,
 } from "../src/types/telemetry";
 
@@ -30,11 +31,13 @@ export class TelemetryWebSocketGateway {
   private simulator: SpaTelemetrySimulator;
   private redisConsumer: RedisTelemetryConsumer;
   private simulationTimer: NodeJS.Timeout | null = null;
+  private statusHeartbeatTimer: NodeJS.Timeout | null = null;
   private startTime: number = Date.now();
   private lastRedisPacketTime: number = 0;
   private totalPacketsSent: number = 0;
   private port: number;
   private host: string;
+  private simulationEnabled: boolean = process.env.SIMULATION_ENABLED === "true"; // default false: wait for real agent
 
   constructor(
     port: number = parseInt(process.env.WS_PORT || "4001", 10),
@@ -59,16 +62,43 @@ export class TelemetryWebSocketGateway {
       }
 
       if (req.url === "/health" || req.url === "/") {
+        const metadata = this.redisConsumer.getMetadata();
         const status = {
           status: "healthy",
           clients: this.clients.size,
-          mode: this.isReceivingLiveRedis() ? "live-redis" : "simulator-60fps",
+          mode: this.isReceivingLiveRedis()
+            ? "live-agent"
+            : this.simulationEnabled
+            ? "simulator-60fps"
+            : "waiting-for-agent",
+          isLive: this.isReceivingLiveRedis(),
           tickRateHz: TICK_RATE_HZ,
+          carModel: metadata.carModel,
+          track: metadata.track,
+          simulationEnabled: this.simulationEnabled,
           totalPacketsSent: this.totalPacketsSent,
+          lastPacketAgeMs: this.lastRedisPacketTime > 0 ? Date.now() - this.lastRedisPacketTime : null,
           uptimeSec: Math.floor((Date.now() - this.startTime) / 1000),
         };
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(status, null, 2));
+        return;
+      }
+
+      if (req.url === "/api/simulation" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            this.setSimulationMode(Boolean(data.enabled));
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "ok", simulationEnabled: this.simulationEnabled }));
+          } catch (e: any) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
         return;
       }
 
@@ -110,13 +140,19 @@ export class TelemetryWebSocketGateway {
     this.setupWebSocketHandlers();
   }
 
+  public setSimulationMode(enabled: boolean) {
+    this.simulationEnabled = enabled;
+    console.log(`[WS Gateway] Simulation mode set to: ${enabled ? "ON (Demo)" : "OFF (Strictly Agent Only)"}`);
+    this.broadcastGatewayStatus();
+  }
+
   private setupWebSocketHandlers() {
     this.wss.on("connection", (ws: WebSocket, req) => {
       const ip = req.socket.remoteAddress || "unknown";
       const subscription: ClientSubscription = {
         ws,
         sessionId: "default",
-        channels: new Set(["telemetry:fast", "strategy:tactics"]), // Default subscribed to both
+        channels: new Set(["telemetry:fast", "strategy:tactics"]),
         ip,
         connectedAt: Date.now(),
       };
@@ -124,13 +160,14 @@ export class TelemetryWebSocketGateway {
       this.clients.set(ws, subscription);
       console.log(`[WS Gateway] Client connected from ${ip}. Active clients: ${this.clients.size}`);
 
-      // Send initial acknowledgement & status
+      // Send initial acknowledgement & current status
       const ack: WebSocketServerMessage = {
         type: "SUBSCRIPTION_ACK",
         channels: Array.from(subscription.channels),
         sessionId: subscription.sessionId,
       };
       ws.send(JSON.stringify(ack));
+      ws.send(JSON.stringify(this.buildStatusMessage()));
 
       ws.on("message", (raw: string | Buffer) => {
         try {
@@ -188,6 +225,10 @@ export class TelemetryWebSocketGateway {
         );
         break;
 
+      case "set_simulation":
+        this.setSimulationMode(Boolean(msg.enabled));
+        break;
+
       case "trigger_event":
         const event: TacticalEvent = {
           id: `client-evt-${Date.now()}`,
@@ -202,8 +243,47 @@ export class TelemetryWebSocketGateway {
     }
   }
 
-  private isReceivingLiveRedis(): boolean {
-    return Date.now() - this.lastRedisPacketTime < 1000;
+  public isReceivingLiveRedis(): boolean {
+    return this.lastRedisPacketTime > 0 && Date.now() - this.lastRedisPacketTime < 2000;
+  }
+
+  private buildStatusMessage(): GatewayStatusMessage {
+    const isLive = this.isReceivingLiveRedis();
+    const metadata = this.redisConsumer.getMetadata();
+
+    let source: "agent" | "waiting_for_agent" | "simulator";
+    if (isLive) {
+      source = "agent";
+    } else if (this.simulationEnabled) {
+      source = "simulator";
+    } else {
+      source = "waiting_for_agent";
+    }
+
+    return {
+      type: "GATEWAY_STATUS",
+      clientsCount: this.clients.size,
+      tickRate: TICK_RATE_HZ,
+      source,
+      isLive,
+      agentStatus: isLive ? "ON_TRACK" : "WAITING_FOR_SESSION",
+      lastPacketTime: this.lastRedisPacketTime,
+      carModel: metadata.carModel,
+      track: metadata.track,
+      simulationEnabled: this.simulationEnabled,
+      totalPacketsSent: this.totalPacketsSent,
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+    };
+  }
+
+  public broadcastGatewayStatus() {
+    if (this.clients.size === 0) return;
+    const json = JSON.stringify(this.buildStatusMessage());
+    for (const [ws] of this.clients.entries()) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(json);
+      }
+    }
   }
 
   public broadcastTelemetry(packet: FastTelemetryPacket) {
@@ -237,9 +317,9 @@ export class TelemetryWebSocketGateway {
       this.broadcastTelemetry(packet);
     });
 
-    // Start 60 Hz ticker (runs simulator when Redis is idle)
+    // Simulation Timer: ONLY runs if simulation is explicitly enabled AND Redis is not streaming!
     this.simulationTimer = setInterval(() => {
-      if (!this.isReceivingLiveRedis()) {
+      if (this.simulationEnabled && !this.isReceivingLiveRedis()) {
         const { packet, event } = this.simulator.tick();
         this.broadcastTelemetry(packet);
         if (event) {
@@ -248,11 +328,16 @@ export class TelemetryWebSocketGateway {
       }
     }, TICK_INTERVAL_MS);
 
+    // Periodic Heartbeat Status Timer (every 1 second)
+    this.statusHeartbeatTimer = setInterval(() => {
+      this.broadcastGatewayStatus();
+    }, 1000);
+
     return new Promise<void>((resolve) => {
       this.server.listen(this.port, this.host, () => {
         console.log(`[WS Gateway] Server listening on http://${this.host}:${this.port}`);
         console.log(`[WS Gateway] WebSocket stream ready at ws://${this.host}:${this.port}/ws/stream`);
-        console.log(`[WS Gateway] Target Tick Rate: ${TICK_RATE_HZ} FPS (interval: ${TICK_INTERVAL_MS}ms)`);
+        console.log(`[WS Gateway] Mode: ${this.simulationEnabled ? "SIMULATOR ACTIVE" : "WAITING FOR AGENT (Redis stream:telemetry:raw)"}`);
         resolve();
       });
     });
@@ -260,6 +345,7 @@ export class TelemetryWebSocketGateway {
 
   public stop() {
     if (this.simulationTimer) clearInterval(this.simulationTimer);
+    if (this.statusHeartbeatTimer) clearInterval(this.statusHeartbeatTimer);
     this.redisConsumer.stop();
     this.wss.close();
     this.server.close();

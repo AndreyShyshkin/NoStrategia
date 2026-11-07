@@ -6,6 +6,9 @@ import {
   TacticalEvent,
   WebSocketServerMessage,
   WebSocketClientMessage,
+  GatewayStatusMessage,
+  formatCarModel,
+  formatTrackName,
 } from "../types/telemetry";
 
 export interface TelemetryBuffers {
@@ -40,9 +43,17 @@ export function useTelemetryWebSocket({
   const [lastPing, setLastPing] = useState<number>(0);
   const [serverStatus, setServerStatus] = useState<string>("Disconnected");
 
+  // Telemetry stream state
+  const [streamSource, setStreamSource] = useState<"agent" | "waiting_for_agent" | "simulator">("waiting_for_agent");
+  const [isLive, setIsLive] = useState<boolean>(false);
+  const [carModel, setCarModel] = useState<string>("Waiting for Car...");
+  const [track, setTrack] = useState<string>("Waiting for Track...");
+  const [simulationEnabled, setSimulationEnabled] = useState<boolean>(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const liveInactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
   const shouldReconnectRef = useRef<boolean>(autoConnect);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
@@ -77,7 +88,7 @@ export function useTelemetryWebSocket({
       ws.onopen = () => {
         setIsConnected(true);
         setIsConnecting(false);
-        setServerStatus("Connected (60 FPS Stream)");
+        setServerStatus("Connected to Gateway");
 
         // Send subscription command
         const subMsg: WebSocketClientMessage = {
@@ -101,6 +112,23 @@ export function useTelemetryWebSocket({
           const data = JSON.parse(event.data) as WebSocketServerMessage;
 
           if (data.type === "FAST_PACKET") {
+            setIsLive(true);
+            setStreamSource(simulationEnabled ? "simulator" : "agent");
+
+            if (data.carModel && data.carModel !== "unknown") {
+              setCarModel(formatCarModel(data.carModel));
+            }
+            if (data.track && data.track !== "unknown") {
+              setTrack(formatTrackName(data.track));
+            }
+
+            // Reset inactivity timer
+            if (liveInactivityTimerRef.current) clearTimeout(liveInactivityTimerRef.current);
+            liveInactivityTimerRef.current = setTimeout(() => {
+              setIsLive(false);
+              setStreamSource("waiting_for_agent");
+            }, 2200);
+
             const b = buffers.current;
             const idx = b.headIndex.current % b.capacity;
 
@@ -115,6 +143,18 @@ export function useTelemetryWebSocket({
             b.headIndex.current++;
             b.totalPacketsReceived.current++;
             b.latestPacket.current = data;
+          } else if (data.type === "GATEWAY_STATUS") {
+            setStreamSource(data.source);
+            setSimulationEnabled(data.simulationEnabled);
+            if (data.carModel && data.carModel !== "Waiting for Car...") {
+              setCarModel(formatCarModel(data.carModel));
+            }
+            if (data.track && data.track !== "Waiting for Track...") {
+              setTrack(formatTrackName(data.track));
+            }
+            if (!data.isLive) {
+              setIsLive(false);
+            }
           } else if (data.type === "TACTICAL_EVENT") {
             if (onEventRef.current) {
               onEventRef.current(data);
@@ -131,6 +171,7 @@ export function useTelemetryWebSocket({
       ws.onclose = () => {
         setIsConnected(false);
         setIsConnecting(false);
+        setIsLive(false);
         setServerStatus("Disconnected");
         if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
 
@@ -148,18 +189,20 @@ export function useTelemetryWebSocket({
       setIsConnecting(false);
       setServerStatus("Connection Failed");
     }
-  }, [url]);
+  }, [url, simulationEnabled]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
     if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+    if (liveInactivityTimerRef.current) clearTimeout(liveInactivityTimerRef.current);
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
     setIsConnected(false);
     setIsConnecting(false);
+    setIsLive(false);
     setServerStatus("Disconnected");
   }, []);
 
@@ -175,6 +218,18 @@ export function useTelemetryWebSocket({
     }
   }, []);
 
+  const toggleSimulation = useCallback((enabled: boolean) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          action: "set_simulation",
+          enabled,
+        })
+      );
+    }
+    setSimulationEnabled(enabled);
+  }, []);
+
   useEffect(() => {
     shouldReconnectRef.current = autoConnect;
     if (autoConnect) {
@@ -184,6 +239,7 @@ export function useTelemetryWebSocket({
       shouldReconnectRef.current = false;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      if (liveInactivityTimerRef.current) clearTimeout(liveInactivityTimerRef.current);
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -194,10 +250,16 @@ export function useTelemetryWebSocket({
     isConnected,
     isConnecting,
     serverStatus,
+    streamSource,
+    isLive,
+    carModel,
+    track,
+    simulationEnabled,
     lastPing,
     buffers: buffers.current,
     connect,
     disconnect,
     sendEvent,
+    toggleSimulation,
   };
 }
