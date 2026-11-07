@@ -39,6 +39,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
   phaseDetails = "Очікування запуску Telemetry Agent...",
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [isPaused, setIsPaused] = useState<boolean>(false);
@@ -96,20 +97,25 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         fpsLastTime.current = now;
       }
 
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const logicalWidth = rect.width || 900;
-      const logicalHeight = height;
+      const wrapper = canvasWrapperRef.current;
+      if (!wrapper) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
 
-      // Ensure bitmap size exactly matches physical pixels (Retina sharp)
+      // Read the exact client inner width of the wrapper container
+      // This is ALWAYS constrained to the visible screen and never overflows
+      const logicalWidth = Math.floor(wrapper.clientWidth) || 900;
+      const logicalHeight = height;
+      const dpr = window.devicePixelRatio || 1;
+
+      // Ensure bitmap size matches physical device pixels (Retina sharp)
       const targetBitmapWidth = Math.floor(logicalWidth * dpr);
       const targetBitmapHeight = Math.floor(logicalHeight * dpr);
 
       if (canvas.width !== targetBitmapWidth || canvas.height !== targetBitmapHeight) {
         canvas.width = targetBitmapWidth;
         canvas.height = targetBitmapHeight;
-        canvas.style.width = `${logicalWidth}px`;
-        canvas.style.height = `${logicalHeight}px`;
       }
 
       const ctx = canvas.getContext("2d", { alpha: false });
@@ -117,7 +123,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         // Reset transform to identity and scale by DPR for subpixel rendering
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        // Render using LOGICAL coordinates so lower zone is never pushed off-screen
+        // Render using LOGICAL coordinates strictly bounded within logicalWidth
         drawCanvas(
           ctx,
           logicalWidth,
@@ -162,19 +168,26 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
   // Interactive Mouse Hover for crosshair and live values
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const wrapper = canvasWrapperRef.current;
+    if (!canvas || !wrapper) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
+    const rect = wrapper.getBoundingClientRect();
     const width = rect.width;
+    const chartRight = Math.max(1, width - 1);
+    const mouseX = Math.max(0, Math.min(chartRight, e.clientX - rect.left));
 
     const cap = buffers.capacity;
     const head = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.head : buffers.headIndex.current;
-    const startIdx = head >= cap ? head % cap : 0;
+    const isBufferFull = head >= cap;
+    const availablePoints = isBufferFull ? cap : Math.max(1, head);
+    const emptyOffset = isBufferFull ? 0 : (cap - availablePoints);
+    const startIdx = isBufferFull ? head % cap : 0;
 
-    const ratio = Math.max(0, Math.min(1, mouseX / width));
-    const pointOffset = Math.floor(ratio * cap);
-    const bufferPos = (startIdx + pointOffset) % cap;
+    const ratio = Math.max(0, Math.min(1, mouseX / chartRight));
+    const i = Math.round(ratio * (cap - 1));
+
+    const isEmpty = !isBufferFull && i < emptyOffset;
+    const bufferPos = isEmpty ? 0 : isBufferFull ? (startIdx + i) % cap : (i - emptyOffset);
 
     const sourceSpeed = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.speed : buffers.speed;
     const sourceGas = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.gas : buffers.gas;
@@ -186,19 +199,19 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     const rawSteer = sourceSteer[bufferPos];
     const steerDeg = Math.abs(rawSteer) <= 3.5 ? rawSteer * (180.0 / Math.PI) : rawSteer;
 
-    const timeDeltaSec = ((pointOffset - cap) / 60);
+    const timeDeltaSec = (i - (cap - 1)) / 60;
     const latest = buffers.latestPacket.current;
     const currentRawGear = latest ? latest.gear : 1;
 
     setHoverData({
       x: mouseX,
-      speed: Math.round(sourceSpeed[bufferPos]),
-      gas: Math.round(sourceGas[bufferPos] * 100),
-      brake: Math.round(sourceBrake[bufferPos] * 100),
-      steer: parseFloat(steerDeg.toFixed(1)),
-      rpm: Math.round(sourceRpm[bufferPos]),
+      speed: isEmpty ? 0 : Math.round(sourceSpeed[bufferPos]),
+      gas: isEmpty ? 0 : Math.round(sourceGas[bufferPos] * 100),
+      brake: isEmpty ? 0 : Math.round(sourceBrake[bufferPos] * 100),
+      steer: isEmpty ? 0 : parseFloat(steerDeg.toFixed(1)),
+      rpm: isEmpty ? 0 : Math.round(sourceRpm[bufferPos]),
       gear: currentRawGear,
-      distNorm: parseFloat(sourceDist[bufferPos].toFixed(3)),
+      distNorm: isEmpty ? 0 : parseFloat(sourceDist[bufferPos].toFixed(3)),
       timeDeltaSec: parseFloat(timeDeltaSec.toFixed(2)),
     });
   };
@@ -323,12 +336,17 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
       </div>
 
       {/* Main Canvas Area */}
-      <div className="relative w-full cursor-crosshair overflow-hidden rounded-lg bg-[#07090e] border border-gray-900">
+      <div
+        ref={canvasWrapperRef}
+        className="relative w-full cursor-crosshair overflow-hidden rounded-lg bg-[#07090e] border border-gray-900"
+        style={{ height: `${height}px` }}
+      >
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
-          className="block w-full"
+          className="block w-full h-full"
+          style={{ width: "100%", height: "100%" }}
         />
 
         {/* Standby / Waiting for Agent Overlay */}
@@ -470,7 +488,10 @@ function drawCanvas(
 ) {
   const cap = buffers.capacity;
   const head = snapshot ? snapshot.head : buffers.headIndex.current;
-  const startIdx = head >= cap ? head % cap : 0;
+  const isBufferFull = head >= cap;
+  const availablePoints = isBufferFull ? cap : Math.max(1, head);
+  const emptyOffset = isBufferFull ? 0 : (cap - availablePoints);
+  const startIdx = isBufferFull ? head % cap : 0;
 
   const speedData = snapshot ? snapshot.speed : buffers.speed;
   const gasData = snapshot ? snapshot.gas : buffers.gas;
@@ -542,7 +563,16 @@ function drawCanvas(
     ctx.textAlign = "left";
   }
 
-  const stepX = width / (cap - 1);
+  // Live edge needle is at chartRight (width - 1) so lines never exceed canvas boundary
+  const chartRight = Math.max(1, width - 1);
+  const stepX = chartRight / (cap - 1);
+
+  // Helper to safely get the buffer index for sample i (from 0 to cap - 1)
+  // Ensures newest live sample is strictly placed at cap - 1 (x = chartRight)
+  const getIdx = (i: number): number => {
+    if (!isBufferFull && i < emptyOffset) return -1;
+    return isBufferFull ? (startIdx + i) % cap : (i - emptyOffset);
+  };
 
   // 1. Draw RPM (Purple dashed) in upper zone
   if (visible.rpm) {
@@ -551,8 +581,8 @@ function drawCanvas(
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = rpmData[idx]; // 0..9000
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? rpmData[bufIdx] : 0;
       const norm = Math.min(1.0, Math.max(0.0, val / 8500));
       const x = i * stepX;
       const y = upperBottomY - norm * upperUsableHeight;
@@ -570,14 +600,14 @@ function drawCanvas(
     ctx.beginPath();
     ctx.moveTo(0, upperBottomY);
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = speedData[idx]; // 0..300 km/h
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? speedData[bufIdx] : 0;
       const norm = Math.min(1.0, Math.max(0.0, val / 300));
       const x = i * stepX;
       const y = upperBottomY - norm * upperUsableHeight;
       ctx.lineTo(x, y);
     }
-    ctx.lineTo(width, upperBottomY);
+    ctx.lineTo(chartRight, upperBottomY);
     ctx.closePath();
     ctx.fill();
 
@@ -588,8 +618,8 @@ function drawCanvas(
     ctx.shadowBlur = 4;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = speedData[idx];
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? speedData[bufIdx] : 0;
       const norm = Math.min(1.0, Math.max(0.0, val / 300));
       const x = i * stepX;
       const y = upperBottomY - norm * upperUsableHeight;
@@ -647,8 +677,8 @@ function drawCanvas(
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const raw = steerData[idx];
+      const bufIdx = getIdx(i);
+      const raw = bufIdx >= 0 ? steerData[bufIdx] : 0;
       // Normalize angle: if in radians (|val| <= 3.5), convert to degrees then scale by 60°
       const deg = Math.abs(raw) <= 3.5 ? raw * (180.0 / Math.PI) : raw;
       const normSteer = Math.max(-1.0, Math.min(1.0, deg / 60.0));
@@ -667,13 +697,13 @@ function drawCanvas(
     ctx.beginPath();
     ctx.moveTo(0, lowerBottomY);
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = Math.max(0.0, Math.min(1.0, gasData[idx]));
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? Math.max(0.0, Math.min(1.0, gasData[bufIdx])) : 0;
       const x = i * stepX;
       const y = lowerBottomY - val * lowerUsableHeight;
       ctx.lineTo(x, y);
     }
-    ctx.lineTo(width, lowerBottomY);
+    ctx.lineTo(chartRight, lowerBottomY);
     ctx.closePath();
     ctx.fill();
 
@@ -684,8 +714,8 @@ function drawCanvas(
     ctx.shadowBlur = 3;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = Math.max(0.0, Math.min(1.0, gasData[idx]));
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? Math.max(0.0, Math.min(1.0, gasData[bufIdx])) : 0;
       const x = i * stepX;
       const y = lowerBottomY - val * lowerUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
@@ -702,13 +732,13 @@ function drawCanvas(
     ctx.beginPath();
     ctx.moveTo(0, lowerBottomY);
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = Math.max(0.0, Math.min(1.0, brakeData[idx]));
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? Math.max(0.0, Math.min(1.0, brakeData[bufIdx])) : 0;
       const x = i * stepX;
       const y = lowerBottomY - val * lowerUsableHeight;
       ctx.lineTo(x, y);
     }
-    ctx.lineTo(width, lowerBottomY);
+    ctx.lineTo(chartRight, lowerBottomY);
     ctx.closePath();
     ctx.fill();
 
@@ -719,8 +749,8 @@ function drawCanvas(
     ctx.shadowBlur = 3;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
-      const idx = (startIdx + i) % cap;
-      const val = Math.max(0.0, Math.min(1.0, brakeData[idx]));
+      const bufIdx = getIdx(i);
+      const val = bufIdx >= 0 ? Math.max(0.0, Math.min(1.0, brakeData[bufIdx])) : 0;
       const x = i * stepX;
       const y = lowerBottomY - val * lowerUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
@@ -730,11 +760,11 @@ function drawCanvas(
     ctx.shadowBlur = 0;
   }
 
-  // Draw current live needle/edge indicator at the rightmost edge
+  // Draw current live needle/edge indicator strictly at chartRight (width - 1)
   ctx.strokeStyle = "#38bdf8";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(width - 1, 0);
-  ctx.lineTo(width - 1, height);
+  ctx.moveTo(chartRight, 0);
+  ctx.lineTo(chartRight, height);
   ctx.stroke();
 }
