@@ -50,7 +50,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     throttle: true,
     brake: true,
     steer: true,
-    rpm: false,
+    rpm: true,
   });
 
   const [fps, setFps] = useState<number>(60);
@@ -83,7 +83,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     let animationFrameId: number;
 
     const render = (now: number) => {
-      // Calculate instantaneous and average FPS
+      // Calculate instantaneous and rolling FPS
       const delta = now - lastRenderTime.current;
       lastRenderTime.current = now;
 
@@ -96,13 +96,32 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         fpsLastTime.current = now;
       }
 
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const logicalWidth = rect.width || 900;
+      const logicalHeight = height;
+
+      // Ensure bitmap size exactly matches physical pixels (Retina sharp)
+      const targetBitmapWidth = Math.floor(logicalWidth * dpr);
+      const targetBitmapHeight = Math.floor(logicalHeight * dpr);
+
+      if (canvas.width !== targetBitmapWidth || canvas.height !== targetBitmapHeight) {
+        canvas.width = targetBitmapWidth;
+        canvas.height = targetBitmapHeight;
+        canvas.style.width = `${logicalWidth}px`;
+        canvas.style.height = `${logicalHeight}px`;
+      }
+
       const ctx = canvas.getContext("2d", { alpha: false });
       if (ctx) {
-        // Draw the canvas using either live circular buffers or paused snapshot
+        // Reset transform to identity and scale by DPR for subpixel rendering
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Render using LOGICAL coordinates so lower zone is never pushed off-screen
         drawCanvas(
           ctx,
-          canvas.width,
-          canvas.height,
+          logicalWidth,
+          logicalHeight,
           buffers,
           isPausedRef.current ? pausedSnapshot.current : null,
           visibleChannels
@@ -117,44 +136,11 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [buffers, visibleChannels]);
-
-  // Handle Canvas Resizing with DevicePixelRatio
-  useEffect(() => {
-    const handleResize = () => {
-      const container = containerRef.current;
-      const canvas = canvasRef.current;
-      if (!container || !canvas) return;
-
-      const rect = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-
-      canvas.width = Math.floor(rect.width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${height}px`;
-
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.scale(dpr, dpr);
-      }
-    };
-
-    handleResize();
-    const resizeObserver = new ResizeObserver(handleResize);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [height]);
+  }, [buffers, visibleChannels, height]);
 
   // Pause / Resume handler
   const handleTogglePause = () => {
     if (!isPaused) {
-      // Snapshot current buffer state for frozen inspection
       const cap = buffers.capacity;
       pausedSnapshot.current = {
         speed: new Float32Array(buffers.speed),
@@ -197,6 +183,9 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     const sourceRpm = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.rpm : buffers.rpm;
     const sourceDist = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.distNorm : buffers.distNorm;
 
+    const rawSteer = sourceSteer[bufferPos];
+    const steerDeg = Math.abs(rawSteer) <= 3.5 ? rawSteer * (180.0 / Math.PI) : rawSteer;
+
     const timeDeltaSec = ((pointOffset - cap) / 60);
     const latest = buffers.latestPacket.current;
     const currentRawGear = latest ? latest.gear : 1;
@@ -206,7 +195,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
       speed: Math.round(sourceSpeed[bufferPos]),
       gas: Math.round(sourceGas[bufferPos] * 100),
       brake: Math.round(sourceBrake[bufferPos] * 100),
-      steer: parseFloat((sourceSteer[bufferPos] * 180).toFixed(1)),
+      steer: parseFloat(steerDeg.toFixed(1)),
       rpm: Math.round(sourceRpm[bufferPos]),
       gear: currentRawGear,
       distNorm: parseFloat(sourceDist[bufferPos].toFixed(3)),
@@ -263,53 +252,58 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => toggleChannel("throttle")}
-            className={`rounded px-2 py-1 font-medium transition ${
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition ${
               visibleChannels.throttle
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
                 : "bg-gray-800/50 text-gray-500 border border-transparent"
             }`}
           >
-            Throttle (Gas)
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span>Throttle</span>
           </button>
           <button
             onClick={() => toggleChannel("brake")}
-            className={`rounded px-2 py-1 font-medium transition ${
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition ${
               visibleChannels.brake
                 ? "bg-rose-500/20 text-rose-400 border border-rose-500/40"
                 : "bg-gray-800/50 text-gray-500 border border-transparent"
             }`}
           >
-            Brake
+            <span className="h-2 w-2 rounded-full bg-rose-400" />
+            <span>Brake</span>
           </button>
           <button
             onClick={() => toggleChannel("speed")}
-            className={`rounded px-2 py-1 font-medium transition ${
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition ${
               visibleChannels.speed
                 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/40"
                 : "bg-gray-800/50 text-gray-500 border border-transparent"
             }`}
           >
-            Speed
+            <span className="h-2 w-2 rounded-full bg-cyan-400" />
+            <span>Speed</span>
           </button>
           <button
             onClick={() => toggleChannel("steer")}
-            className={`rounded px-2 py-1 font-medium transition ${
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition ${
               visibleChannels.steer
                 ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
                 : "bg-gray-800/50 text-gray-500 border border-transparent"
             }`}
           >
-            Steering
+            <span className="h-2 w-2 rounded-full bg-amber-400" />
+            <span>Steer</span>
           </button>
           <button
             onClick={() => toggleChannel("rpm")}
-            className={`rounded px-2 py-1 font-medium transition ${
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition ${
               visibleChannels.rpm
                 ? "bg-purple-500/20 text-purple-400 border border-purple-500/40"
                 : "bg-gray-800/50 text-gray-500 border border-transparent"
             }`}
           >
-            RPM
+            <span className="h-2 w-2 rounded-full bg-purple-400" />
+            <span>RPM</span>
           </button>
 
           <div className="h-4 w-px bg-gray-700 mx-1" />
@@ -411,7 +405,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
               style={{
                 left: `${Math.min(
                   Math.max(10, hoverData.x - 120),
-                  (containerRef.current?.clientWidth || 900) - 260
+                  (containerRef.current?.clientWidth || 900) - 280
                 )}px`,
               }}
             >
@@ -451,6 +445,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
 
 /**
  * Fast Uncontrolled Canvas Rendering Engine (Zero Garbage Collection)
+ * Renders in exact logical coordinates (width, height) scaled by DPR
  */
 function drawCanvas(
   ctx: CanvasRenderingContext2D,
@@ -487,17 +482,17 @@ function drawCanvas(
   ctx.fillStyle = "#07090e";
   ctx.fillRect(0, 0, width, height);
 
-  // Divide canvas into 2 visual zones:
-  // Upper zone: Speed & RPM (0% to 50% height)
-  // Lower zone: Throttle, Brake & Steering (52% to 100% height)
-  const zoneSplitY = height * 0.5;
+  // Divide canvas cleanly into 2 visual telemetry zones:
+  // Zone 1: Speed & RPM (0% to 48% height)
+  // Zone 2: Pedals & Steering (50% to 100% height)
+  const zoneSplitY = Math.floor(height * 0.48);
 
-  // Grid lines and scales
+  // Grid background lines
   ctx.lineWidth = 1;
-  ctx.strokeStyle = "#161d2b";
+  ctx.strokeStyle = "#131924";
 
-  // Horizontal guidelines
-  const hLines = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+  // Horizontal guidelines across zones
+  const hLines = [0.12, 0.24, 0.36, 0.62, 0.76, 0.88];
   for (const ratio of hLines) {
     const y = Math.floor(height * ratio);
     ctx.beginPath();
@@ -506,7 +501,7 @@ function drawCanvas(
     ctx.stroke();
   }
 
-  // Zone separator
+  // Zone separator line
   ctx.strokeStyle = "#253147";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -516,7 +511,7 @@ function drawCanvas(
 
   // Vertical time division lines (every 2 seconds)
   const vDivisions = 10;
-  ctx.strokeStyle = "#141a24";
+  ctx.strokeStyle = "#121721";
   ctx.lineWidth = 1;
   for (let i = 1; i < vDivisions; i++) {
     const x = Math.floor((width / vDivisions) * i);
@@ -526,31 +521,41 @@ function drawCanvas(
     ctx.stroke();
   }
 
-  // Axis Labels & Legends in background
+  // -------------------------------------------------------------
+  // ZONE 1: Speed & Engine RPM (Upper Zone: 16px to zoneSplitY - 14px)
+  // -------------------------------------------------------------
+  const upperTopY = 16;
+  const upperBottomY = zoneSplitY - 14;
+  const upperUsableHeight = upperBottomY - upperTopY;
+
+  // Axis Labels & Legends for Zone 1
   ctx.font = "10px JetBrains Mono, monospace";
   ctx.fillStyle = "#4b5563";
-  ctx.fillText("300 km/h", 8, 18);
-  ctx.fillText("150 km/h", 8, zoneSplitY * 0.5 + 4);
-  ctx.fillText("0 km/h", 8, zoneSplitY - 6);
+  ctx.fillText("300 km/h", 8, upperTopY + 4);
+  ctx.fillText("150 km/h", 8, upperTopY + upperUsableHeight * 0.5 + 4);
+  ctx.fillText("0 km/h", 8, upperBottomY + 2);
 
-  ctx.fillText("100% Pedals", 8, zoneSplitY + 18);
-  ctx.fillText("50%", 8, zoneSplitY + (height - zoneSplitY) * 0.5 + 4);
-  ctx.fillText("0%", 8, height - 6);
+  if (visible.rpm) {
+    ctx.textAlign = "right";
+    ctx.fillText("9000 RPM", width - 8, upperTopY + 4);
+    ctx.fillText("4500 RPM", width - 8, upperTopY + upperUsableHeight * 0.5 + 4);
+    ctx.textAlign = "left";
+  }
 
   const stepX = width / (cap - 1);
 
   // 1. Draw RPM (Purple dashed) in upper zone
   if (visible.rpm) {
-    ctx.strokeStyle = "#a855f7";
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "#c084fc";
+    ctx.lineWidth = 1.4;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
       const idx = (startIdx + i) % cap;
       const val = rpmData[idx]; // 0..9000
-      const norm = Math.min(1.0, Math.max(0.0, val / 9000));
+      const norm = Math.min(1.0, Math.max(0.0, val / 8500));
       const x = i * stepX;
-      const y = zoneSplitY - norm * (zoneSplitY - 12);
+      const y = upperBottomY - norm * upperUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -558,8 +563,25 @@ function drawCanvas(
     ctx.setLineDash([]);
   }
 
-  // 2. Draw Speed (Cyan) in upper zone
+  // 2. Draw Speed (Cyan) in upper zone with subtle glowing fill
   if (visible.speed) {
+    // Subtle area fill underneath speed trace
+    ctx.fillStyle = "rgba(6, 182, 212, 0.08)";
+    ctx.beginPath();
+    ctx.moveTo(0, upperBottomY);
+    for (let i = 0; i < cap; i++) {
+      const idx = (startIdx + i) % cap;
+      const val = speedData[idx]; // 0..300 km/h
+      const norm = Math.min(1.0, Math.max(0.0, val / 300));
+      const x = i * stepX;
+      const y = upperBottomY - norm * upperUsableHeight;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, upperBottomY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Speed stroke line
     ctx.strokeStyle = "#06b6d4";
     ctx.lineWidth = 2.2;
     ctx.shadowColor = "#06b6d4";
@@ -567,10 +589,10 @@ function drawCanvas(
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
       const idx = (startIdx + i) % cap;
-      const val = speedData[idx]; // 0..300 km/h
+      const val = speedData[idx];
       const norm = Math.min(1.0, Math.max(0.0, val / 300));
       const x = i * stepX;
-      const y = zoneSplitY - norm * (zoneSplitY - 12);
+      const y = upperBottomY - norm * upperUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -578,38 +600,94 @@ function drawCanvas(
     ctx.shadowBlur = 0;
   }
 
-  // Lower Zone Base Parameters
-  const lowerHeight = height - zoneSplitY;
+  // -------------------------------------------------------------
+  // ZONE 2: Pedals & Steering (Lower Zone: zoneSplitY + 16px to height - 16px)
+  // -------------------------------------------------------------
+  const lowerTopY = zoneSplitY + 16;
+  const lowerBottomY = height - 18;
+  const lowerUsableHeight = lowerBottomY - lowerTopY;
+  const steerCenterY = Math.floor(lowerTopY + lowerUsableHeight * 0.5);
 
-  // 3. Draw Steering Angle (Yellow/Amber) in lower zone (centered around middle of lower zone)
+  // Baseline and Guides for Zone 2
+  ctx.strokeStyle = "#1b2434";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, lowerBottomY);
+  ctx.lineTo(width, lowerBottomY);
+  ctx.stroke();
+
+  // Steer center 0° line (subtle amber dashed)
+  ctx.strokeStyle = "#2e2712";
+  ctx.setLineDash([3, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, steerCenterY);
+  ctx.lineTo(width, steerCenterY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axis Labels & Legends for Zone 2
+  ctx.font = "10px JetBrains Mono, monospace";
+  ctx.fillStyle = "#4b5563";
+  ctx.fillText("100% Pedals", 8, lowerTopY + 2);
+  ctx.fillText("50%", 8, steerCenterY + 3);
+  ctx.fillText("0% Pedals", 8, lowerBottomY + 12);
+
   if (visible.steer) {
-    ctx.strokeStyle = "#eab308";
-    ctx.lineWidth = 1.4;
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#854d0e";
+    ctx.fillText("+60° Steer", width - 8, lowerTopY + 2);
+    ctx.fillText("0° (Center)", width - 8, steerCenterY + 3);
+    ctx.fillText("-60° Steer", width - 8, lowerBottomY + 12);
+    ctx.textAlign = "left";
+  }
+
+  // 3. Draw Steering Angle (Yellow/Amber) in lower zone
+  if (visible.steer) {
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
-    const steerCenterY = zoneSplitY + lowerHeight * 0.5;
     for (let i = 0; i < cap; i++) {
       const idx = (startIdx + i) % cap;
-      const val = steerData[idx]; // -1.0 .. +1.0
+      const raw = steerData[idx];
+      // Normalize angle: if in radians (|val| <= 3.5), convert to degrees then scale by 60°
+      const deg = Math.abs(raw) <= 3.5 ? raw * (180.0 / Math.PI) : raw;
+      const normSteer = Math.max(-1.0, Math.min(1.0, deg / 60.0));
       const x = i * stepX;
-      const y = steerCenterY - val * (lowerHeight * 0.42);
+      const y = steerCenterY - normSteer * (lowerUsableHeight * 0.45);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
 
-  // 4. Draw Gas / Throttle (Neon Green) in lower zone
+  // 4. Draw Gas / Throttle (Neon Green) in lower zone with area fill
   if (visible.throttle) {
+    // Area fill under throttle
+    ctx.fillStyle = "rgba(34, 197, 94, 0.15)";
+    ctx.beginPath();
+    ctx.moveTo(0, lowerBottomY);
+    for (let i = 0; i < cap; i++) {
+      const idx = (startIdx + i) % cap;
+      const val = Math.max(0.0, Math.min(1.0, gasData[idx]));
+      const x = i * stepX;
+      const y = lowerBottomY - val * lowerUsableHeight;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, lowerBottomY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Throttle stroke line
     ctx.strokeStyle = "#22c55e";
-    ctx.lineWidth = 2.0;
+    ctx.lineWidth = 2.2;
     ctx.shadowColor = "#22c55e";
     ctx.shadowBlur = 3;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
       const idx = (startIdx + i) % cap;
-      const val = gasData[idx]; // 0.0 .. 1.0
+      const val = Math.max(0.0, Math.min(1.0, gasData[idx]));
       const x = i * stepX;
-      const y = height - 4 - val * (lowerHeight - 16);
+      const y = lowerBottomY - val * lowerUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
@@ -617,18 +695,34 @@ function drawCanvas(
     ctx.shadowBlur = 0;
   }
 
-  // 5. Draw Brake (Racing Red) in lower zone
+  // 5. Draw Brake (Racing Red) in lower zone with area fill
   if (visible.brake) {
+    // Area fill under brake
+    ctx.fillStyle = "rgba(239, 68, 68, 0.20)";
+    ctx.beginPath();
+    ctx.moveTo(0, lowerBottomY);
+    for (let i = 0; i < cap; i++) {
+      const idx = (startIdx + i) % cap;
+      const val = Math.max(0.0, Math.min(1.0, brakeData[idx]));
+      const x = i * stepX;
+      const y = lowerBottomY - val * lowerUsableHeight;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, lowerBottomY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Brake stroke line
     ctx.strokeStyle = "#ef4444";
-    ctx.lineWidth = 2.0;
+    ctx.lineWidth = 2.2;
     ctx.shadowColor = "#ef4444";
     ctx.shadowBlur = 3;
     ctx.beginPath();
     for (let i = 0; i < cap; i++) {
       const idx = (startIdx + i) % cap;
-      const val = brakeData[idx]; // 0.0 .. 1.0
+      const val = Math.max(0.0, Math.min(1.0, brakeData[idx]));
       const x = i * stepX;
-      const y = height - 4 - val * (lowerHeight - 16);
+      const y = lowerBottomY - val * lowerUsableHeight;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
