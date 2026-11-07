@@ -14,7 +14,7 @@ export interface TacticalEvent {
   type: "TACTICAL_EVENT";
   priority: AudioPriority;
   text: string;
-  category: "LOCKUP" | "SPIN" | "STRATEGY" | "TYRE_TEMP" | "SECTOR" | "PACE";
+  category: "LOCKUP" | "SPIN" | "STRATEGY" | "TYRE_TEMP" | "SECTOR" | "PACE" | "LAP" | "GENERAL";
   timestamp: number;
 }
 

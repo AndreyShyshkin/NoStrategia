@@ -121,9 +121,9 @@ export class RedisTelemetryConsumer {
           ">"
         );
 
-        if (response && response.length > 0) {
-          const streamData = response[0];
-          const messages = streamData[1];
+        if (response && (response as any[]).length > 0) {
+          const streamData = (response as any[])[0] as [string, any[]];
+          const messages = streamData[1] as Array<[string, string[]]>;
 
           for (const msg of messages) {
             const [id, fields] = msg;
