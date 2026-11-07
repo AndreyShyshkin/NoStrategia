@@ -12,6 +12,7 @@ export class RedisTelemetryConsumer {
   private lastKnownCarModel: string = "Waiting for Car...";
   private lastKnownTrack: string = "Waiting for Track...";
   private lastKnownSessionId: string = "Waiting for Session...";
+  private latestPacket: FastTelemetryPacket | null = null;
 
   constructor(
     redisAddr: string = process.env.REDIS_ADDR || "127.0.0.1:6379",
@@ -72,11 +73,12 @@ export class RedisTelemetryConsumer {
     return this.isConnected;
   }
 
-  public getMetadata(): { carModel: string; track: string; sessionId: string } {
+  public getMetadata(): { carModel: string; track: string; sessionId: string; latestPacket: FastTelemetryPacket | null } {
     return {
       carModel: this.lastKnownCarModel,
       track: this.lastKnownTrack,
       sessionId: this.lastKnownSessionId,
+      latestPacket: this.latestPacket,
     };
   }
 
@@ -102,6 +104,7 @@ export class RedisTelemetryConsumer {
         const [, fields] = res[0] as [string, string[]];
         const packet = this.parseStreamFields(fields);
         if (packet) {
+          this.latestPacket = packet;
           if (packet.carModel && packet.carModel !== "unknown") this.lastKnownCarModel = packet.carModel;
           if (packet.track && packet.track !== "unknown") this.lastKnownTrack = packet.track;
           if (packet.sessionId) this.lastKnownSessionId = packet.sessionId;
@@ -155,6 +158,7 @@ export class RedisTelemetryConsumer {
             const [id, fields] = msg;
             const parsed = this.parseStreamFields(fields);
             if (parsed) {
+              this.latestPacket = parsed;
               if (parsed.carModel && parsed.carModel !== "unknown") this.lastKnownCarModel = parsed.carModel;
               if (parsed.track && parsed.track !== "unknown") this.lastKnownTrack = parsed.track;
               if (parsed.sessionId) this.lastKnownSessionId = parsed.sessionId;
@@ -205,7 +209,7 @@ export class RedisTelemetryConsumer {
     const gas = parseFloat((raw.gas ?? fallbackMap["gas"] ?? 0).toFixed(3));
     const brake = parseFloat((raw.brake ?? fallbackMap["brake"] ?? 0).toFixed(3));
     const steer = parseFloat((raw.steerAngle ?? raw.steer ?? fallbackMap["steerAngle"] ?? 0).toFixed(3));
-    const gear = raw.gear ?? parseInt(fallbackMap["gear"] || "0", 10);
+    const gear = raw.gear ?? parseInt(fallbackMap["gear"] || "1", 10);
     const rpm = Math.round(raw.rpm ?? parseInt(fallbackMap["rpm"] || "0", 10));
     const distNorm = parseFloat((raw.normalizedCarPosition ?? raw.distNorm ?? fallbackMap["distNorm"] ?? 0).toFixed(4));
     const currentSector = raw.currentSectorIndex ?? raw.currentSector ?? 0;
@@ -215,6 +219,18 @@ export class RedisTelemetryConsumer {
     const longG = parseFloat((raw.longG ?? (raw.accG ? raw.accG[1] : fallbackMap["longG"]) ?? 0).toFixed(2));
     const yawRate = parseFloat((raw.yawRate ?? (raw.localAngularVel ? raw.localAngularVel[0] : fallbackMap["yawRate"]) ?? 0).toFixed(3));
     const fuel = parseFloat((raw.fuel ?? fallbackMap["fuel"] ?? 50.0).toFixed(1));
+
+    const status = raw.status !== undefined ? raw.status : parseInt(fallbackMap["status"] || "2", 10);
+    const isInPitLane = raw.isInPitLane !== undefined ? raw.isInPitLane : parseInt(fallbackMap["isInPitLane"] || "0", 10);
+    const isInPit = raw.isInPit !== undefined ? raw.isInPit : parseInt(fallbackMap["isInPit"] || "0", 10);
+
+    const iCurrentTime = raw.iCurrentTime ?? 0;
+    const iLastTime = raw.iLastTime ?? 0;
+    const iBestTime = raw.iBestTime ?? 0;
+
+    const wheelsPressure = raw.wheelsPressure ?? undefined;
+    const tyreCoreTemp = raw.tyreCoreTemperature ?? undefined;
+    const brakeTemp = raw.brakeTemp ?? undefined;
 
     return {
       type: "FAST_PACKET",
@@ -236,6 +252,15 @@ export class RedisTelemetryConsumer {
       longG,
       yawRate,
       fuel,
+      status,
+      isInPitLane,
+      isInPit,
+      iCurrentTime,
+      iLastTime,
+      iBestTime,
+      wheelsPressure,
+      tyreCoreTemp,
+      brakeTemp,
       rawArray: [timestamp, packetId, distNorm, speed, gas, brake, steer, gear, rpm, yawRate, latG, longG],
     };
   }

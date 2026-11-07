@@ -1,4 +1,5 @@
 import http from "http";
+import { exec } from "child_process";
 import { WebSocketServer, WebSocket } from "ws";
 import { SpaTelemetrySimulator } from "./simulator";
 import { RedisTelemetryConsumer } from "./redis-consumer";
@@ -8,6 +9,7 @@ import {
   WebSocketClientMessage,
   WebSocketServerMessage,
   GatewayStatusMessage,
+  SessionPhase,
   AudioPriority,
 } from "../src/types/telemetry";
 
@@ -37,7 +39,11 @@ export class TelemetryWebSocketGateway {
   private totalPacketsSent: number = 0;
   private port: number;
   private host: string;
-  private simulationEnabled: boolean = process.env.SIMULATION_ENABLED === "true"; // default false: wait for real agent
+  private simulationEnabled: boolean = process.env.SIMULATION_ENABLED === "true";
+
+  // Agent detection cache
+  private isAgentProcessRunning: boolean = false;
+  private lastProcessCheckTime: number = 0;
 
   constructor(
     port: number = parseInt(process.env.WS_PORT || "4001", 10),
@@ -50,7 +56,6 @@ export class TelemetryWebSocketGateway {
 
     // Create HTTP server for health checks & manual triggers
     this.server = http.createServer((req, res) => {
-      // CORS headers
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -62,19 +67,18 @@ export class TelemetryWebSocketGateway {
       }
 
       if (req.url === "/health" || req.url === "/") {
-        const metadata = this.redisConsumer.getMetadata();
+        const statusMsg = this.buildStatusMessage();
         const status = {
           status: "healthy",
           clients: this.clients.size,
-          mode: this.isReceivingLiveRedis()
-            ? "live-agent"
-            : this.simulationEnabled
-            ? "simulator-60fps"
-            : "waiting-for-agent",
-          isLive: this.isReceivingLiveRedis(),
+          mode: statusMsg.source,
+          sessionPhase: statusMsg.sessionPhase,
+          agentConnected: statusMsg.agentConnected,
+          isLive: statusMsg.isLive,
           tickRateHz: TICK_RATE_HZ,
-          carModel: metadata.carModel,
-          track: metadata.track,
+          carModel: statusMsg.showCarAndTrack ? statusMsg.carModel : null,
+          track: statusMsg.showCarAndTrack ? statusMsg.track : null,
+          showCarAndTrack: statusMsg.showCarAndTrack,
           simulationEnabled: this.simulationEnabled,
           totalPacketsSent: this.totalPacketsSent,
           lastPacketAgeMs: this.lastRedisPacketTime > 0 ? Date.now() - this.lastRedisPacketTime : null,
@@ -146,8 +150,23 @@ export class TelemetryWebSocketGateway {
     this.broadcastGatewayStatus();
   }
 
+  private checkAgentProcess(): Promise<boolean> {
+    const now = Date.now();
+    if (now - this.lastProcessCheckTime < 1500) {
+      return Promise.resolve(this.isAgentProcessRunning);
+    }
+    this.lastProcessCheckTime = now;
+
+    return new Promise((resolve) => {
+      exec("pgrep -f TelemetryAgent", (err, stdout) => {
+        this.isAgentProcessRunning = !err && stdout.trim().length > 0;
+        resolve(this.isAgentProcessRunning);
+      });
+    });
+  }
+
   private setupWebSocketHandlers() {
-    this.wss.on("connection", (ws: WebSocket, req) => {
+    this.wss.on("connection", async (ws: WebSocket, req) => {
       const ip = req.socket.remoteAddress || "unknown";
       const subscription: ClientSubscription = {
         ws,
@@ -159,6 +178,8 @@ export class TelemetryWebSocketGateway {
 
       this.clients.set(ws, subscription);
       console.log(`[WS Gateway] Client connected from ${ip}. Active clients: ${this.clients.size}`);
+
+      await this.checkAgentProcess();
 
       // Send initial acknowledgement & current status
       const ack: WebSocketServerMessage = {
@@ -244,32 +265,76 @@ export class TelemetryWebSocketGateway {
   }
 
   public isReceivingLiveRedis(): boolean {
-    return this.lastRedisPacketTime > 0 && Date.now() - this.lastRedisPacketTime < 2000;
+    return this.lastRedisPacketTime > 0 && Date.now() - this.lastRedisPacketTime < 2500;
   }
 
   private buildStatusMessage(): GatewayStatusMessage {
     const isLive = this.isReceivingLiveRedis();
     const metadata = this.redisConsumer.getMetadata();
+    const latest = metadata.latestPacket;
 
-    let source: "agent" | "waiting_for_agent" | "simulator";
-    if (isLive) {
-      source = "agent";
-    } else if (this.simulationEnabled) {
-      source = "simulator";
+    // Agent is considered connected if its process is detected or packets arrived recently
+    const agentConnected = this.isAgentProcessRunning || isLive || (Date.now() - this.lastRedisPacketTime < 10000);
+
+    let sessionPhase: SessionPhase = "WAITING_FOR_AGENT";
+    let phaseDetails: string = "Очікування запуску Telemetry Agent...";
+    let showCarAndTrack: boolean = false;
+
+    if (this.simulationEnabled) {
+      sessionPhase = "LIVE_ON_TRACK";
+      phaseDetails = "Автономна демо-симуляція Spa-Francorchamps";
+      showCarAndTrack = true;
+    } else if (!agentConnected) {
+      sessionPhase = "WAITING_FOR_AGENT";
+      phaseDetails = "TelemetryAgent не запущено. Запустіть агент для підключення до гри.";
+      showCarAndTrack = false;
+    } else if (isLive && latest) {
+      // Actively streaming frames from ACC
+      if (latest.status === 0) {
+        sessionPhase = "IN_LOBBY";
+        phaseDetails = "Гра активна, гравець у головному меню / лобі";
+        showCarAndTrack = false;
+      } else if (latest.status === 3) {
+        sessionPhase = "SESSION_PAUSED";
+        phaseDetails = "Сесію призупинено в меню паузи";
+        showCarAndTrack = true;
+      } else if (latest.status === 1) {
+        sessionPhase = "REPLAY";
+        phaseDetails = "Перегляд повтору (Replay Mode)";
+        showCarAndTrack = true;
+      } else if (latest.isInPitLane === 1) {
+        sessionPhase = "IN_PIT_LANE";
+        phaseDetails = "Піт-лейн (обмежувач швидкості активний, 10 Гц)";
+        showCarAndTrack = true;
+      } else if (latest.isInPit === 1 || (latest.speed < 1.0 && latest.gas === 0 && latest.brake === 0)) {
+        sessionPhase = "IN_GARAGE";
+        phaseDetails = "Бокси / Меню налаштування сетапу автомобіля";
+        showCarAndTrack = true;
+      } else {
+        sessionPhase = "LIVE_ON_TRACK";
+        phaseDetails = "Assetto Corsa Competizione (Бойовий заїзд 60 Гц)";
+        showCarAndTrack = true;
+      }
     } else {
-      source = "waiting_for_agent";
+      // Agent is running, but no live telemetry dispatched -> in lobby / menu
+      sessionPhase = "IN_LOBBY";
+      phaseDetails = "Агент підключений • Гра в лобі / вибір автомобіля";
+      showCarAndTrack = false;
     }
 
     return {
       type: "GATEWAY_STATUS",
       clientsCount: this.clients.size,
       tickRate: TICK_RATE_HZ,
-      source,
+      source: isLive ? "agent" : this.simulationEnabled ? "simulator" : "waiting_for_agent",
       isLive,
-      agentStatus: isLive ? "ON_TRACK" : "WAITING_FOR_SESSION",
+      agentConnected,
+      sessionPhase,
+      phaseDetails,
       lastPacketTime: this.lastRedisPacketTime,
-      carModel: metadata.carModel,
-      track: metadata.track,
+      carModel: showCarAndTrack ? metadata.carModel : "",
+      track: showCarAndTrack ? metadata.track : "",
+      showCarAndTrack,
       simulationEnabled: this.simulationEnabled,
       totalPacketsSent: this.totalPacketsSent,
       uptime: Math.floor((Date.now() - this.startTime) / 1000),
@@ -317,6 +382,9 @@ export class TelemetryWebSocketGateway {
       this.broadcastTelemetry(packet);
     });
 
+    // Check agent process on start
+    await this.checkAgentProcess();
+
     // Simulation Timer: ONLY runs if simulation is explicitly enabled AND Redis is not streaming!
     this.simulationTimer = setInterval(() => {
       if (this.simulationEnabled && !this.isReceivingLiveRedis()) {
@@ -329,7 +397,8 @@ export class TelemetryWebSocketGateway {
     }, TICK_INTERVAL_MS);
 
     // Periodic Heartbeat Status Timer (every 1 second)
-    this.statusHeartbeatTimer = setInterval(() => {
+    this.statusHeartbeatTimer = setInterval(async () => {
+      await this.checkAgentProcess();
       this.broadcastGatewayStatus();
     }, 1000);
 

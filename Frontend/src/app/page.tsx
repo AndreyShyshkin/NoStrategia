@@ -7,7 +7,7 @@ import { TelemetryGauges } from "../components/telemetry/TelemetryGauges";
 import { AudioEngineerWidget } from "../components/audio/AudioEngineerWidget";
 import { AudioRaceEngineer, AudioMessage } from "../services/AudioRaceEngineer";
 import { TacticalEvent, AudioPriority } from "../types/telemetry";
-import { Wifi, WifiOff, Car, MapPin, Radio, Terminal, Settings2, RefreshCw, Play, Square } from "lucide-react";
+import { Wifi, WifiOff, Car, MapPin, Radio, Terminal, Settings2, RefreshCw, Play, Square, Layers } from "lucide-react";
 
 export default function TelemetryDashboard() {
   const [audioEngineerInstance] = useState(() => new AudioRaceEngineer());
@@ -35,6 +35,10 @@ export default function TelemetryDashboard() {
     serverStatus,
     streamSource,
     isLive,
+    agentConnected,
+    sessionPhase,
+    phaseDetails,
+    showCarAndTrack,
     carModel,
     track,
     simulationEnabled,
@@ -65,6 +69,79 @@ export default function TelemetryDashboard() {
     setRecentCallouts((prev) => [manualMsg, ...prev.slice(0, 19)]);
   };
 
+  const getSessionPhaseBadge = () => {
+    if (!isConnected) {
+      return {
+        text: "Шлюз відключено",
+        color: "bg-rose-500",
+        textColor: "text-rose-400",
+        pingColor: "bg-rose-400",
+      };
+    }
+    if (simulationEnabled) {
+      return {
+        text: "Демо-симулятор (Spa 60 FPS)",
+        color: "bg-purple-500",
+        textColor: "text-purple-400",
+        pingColor: "bg-purple-400",
+      };
+    }
+    switch (sessionPhase) {
+      case "LIVE_ON_TRACK":
+        return {
+          text: "На трасі (Live 60 Гц)",
+          color: "bg-emerald-500",
+          textColor: "text-emerald-400",
+          pingColor: "bg-emerald-400",
+        };
+      case "IN_PIT_LANE":
+        return {
+          text: "Піт-лейн (10 Гц)",
+          color: "bg-orange-500",
+          textColor: "text-orange-400",
+          pingColor: "bg-orange-400",
+        };
+      case "IN_GARAGE":
+        return {
+          text: "Гараж / Бокси",
+          color: "bg-cyan-500",
+          textColor: "text-cyan-400",
+          pingColor: "bg-cyan-400",
+        };
+      case "SESSION_PAUSED":
+        return {
+          text: "Пауза сесії",
+          color: "bg-blue-500",
+          textColor: "text-blue-400",
+          pingColor: "bg-blue-400",
+        };
+      case "REPLAY":
+        return {
+          text: "Реплей",
+          color: "bg-purple-500",
+          textColor: "text-purple-400",
+          pingColor: "bg-purple-400",
+        };
+      case "IN_LOBBY":
+        return {
+          text: "Агент підключений • В лобі",
+          color: "bg-amber-500",
+          textColor: "text-amber-400",
+          pingColor: "bg-amber-400",
+        };
+      case "WAITING_FOR_AGENT":
+      default:
+        return {
+          text: "Очікування агента",
+          color: "bg-rose-500",
+          textColor: "text-rose-400",
+          pingColor: "bg-rose-400",
+        };
+    }
+  };
+
+  const badgeInfo = getSessionPhaseBadge();
+
   return (
     <div className="flex min-h-screen flex-col bg-[#07090e] text-gray-100">
       {/* 1. Header / Top Navigation Bar */}
@@ -86,20 +163,29 @@ export default function TelemetryDashboard() {
             </div>
           </div>
 
-          {/* Car & Track Status Badges (Dynamic from Agent) */}
+          {/* Car & Track Badges (STRICTLY shown only when on track / session; HIDDEN in lobby) */}
           <div className="hidden sm:flex items-center gap-2 text-xs font-mono">
-            <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/50 px-2.5 py-1 text-gray-300">
-              <Car className="h-3.5 w-3.5 text-cyan-400" />
-              <span className={carModel.startsWith("Waiting") ? "text-gray-500 italic" : "text-gray-200 font-bold"}>
-                {carModel}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/50 px-2.5 py-1 text-gray-300">
-              <MapPin className="h-3.5 w-3.5 text-emerald-400" />
-              <span className={track.startsWith("Waiting") ? "text-gray-500 italic" : "text-gray-200 font-bold"}>
-                {track}
-              </span>
-            </div>
+            {showCarAndTrack ? (
+              <>
+                <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/60 px-2.5 py-1 text-gray-200 font-semibold shadow-inner">
+                  <Car className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>{carModel}</span>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-lg border border-gray-800 bg-black/60 px-2.5 py-1 text-gray-200 font-semibold shadow-inner">
+                  <MapPin className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>{track}</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5 rounded-lg border border-gray-800/80 bg-black/30 px-3 py-1 text-gray-500 italic">
+                <Layers className="h-3.5 w-3.5 text-gray-600" />
+                <span>
+                  {agentConnected
+                    ? "В лобі гри (вибір автомобіля та траси)"
+                    : "Очікування запуску TelemetryAgent"}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* WebSocket Connection Indicator & Actions */}
@@ -108,37 +194,13 @@ export default function TelemetryDashboard() {
               <span className="relative flex h-2 w-2">
                 {isConnected && (
                   <span
-                    className={`absolute inline-flex h-full w-full animate-ping rounded-full ${
-                      isLive ? "bg-emerald-400" : "bg-amber-400"
-                    } opacity-75`}
+                    className={`absolute inline-flex h-full w-full animate-ping rounded-full ${badgeInfo.pingColor} opacity-75`}
                   ></span>
                 )}
-                <span
-                  className={`relative inline-flex h-2 w-2 rounded-full ${
-                    !isConnected
-                      ? "bg-rose-500"
-                      : isLive
-                      ? "bg-emerald-500"
-                      : "bg-amber-500"
-                  }`}
-                />
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${badgeInfo.color}`} />
               </span>
-              <span
-                className={
-                  !isConnected
-                    ? "text-rose-400"
-                    : isLive
-                    ? "text-emerald-400 font-semibold"
-                    : "text-amber-400"
-                }
-              >
-                {!isConnected
-                  ? "Disconnected"
-                  : isLive
-                  ? "Live Agent Feed (ACC Session)"
-                  : streamSource === "simulator"
-                  ? "Simulator Active"
-                  : "Standby: Waiting for Agent"}
+              <span className={`${badgeInfo.textColor} font-semibold`}>
+                {badgeInfo.text}
               </span>
               {isConnected && lastPing > 0 && (
                 <span className="text-gray-500 text-[11px]">({lastPing}ms)</span>
@@ -191,7 +253,7 @@ export default function TelemetryDashboard() {
                 </button>
               </div>
 
-              {/* Simulation Mode Toggle (OFF by default: strictly waits for real TelemetryAgent) */}
+              {/* Simulation Mode Toggle (strictly OFF by default: waits for real TelemetryAgent) */}
               <div className="flex items-center gap-3 border-t sm:border-t-0 sm:border-l border-gray-800 pt-2 sm:pt-0 sm:pl-4">
                 <span className="text-gray-400">Offline Simulation Mode:</span>
                 <button
@@ -215,7 +277,11 @@ export default function TelemetryDashboard() {
       <main className="mx-auto w-full max-w-7xl flex-1 space-y-4 p-4">
         {/* HUD Instantaneous Gauges */}
         <section>
-          <TelemetryGauges buffers={buffers} isLive={isLive} />
+          <TelemetryGauges
+            buffers={buffers}
+            isLive={isLive}
+            sessionPhase={sessionPhase}
+          />
         </section>
 
         {/* 60 FPS Uncontrolled Canvas Live Charts */}
@@ -226,6 +292,8 @@ export default function TelemetryDashboard() {
             showFps={true}
             isLive={isLive}
             streamSource={streamSource}
+            sessionPhase={sessionPhase}
+            phaseDetails={phaseDetails}
           />
         </section>
 

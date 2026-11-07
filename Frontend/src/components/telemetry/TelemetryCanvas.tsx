@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { TelemetryBuffers } from "../../hooks/useTelemetryWebSocket";
+import { formatGear, SessionPhase } from "../../types/telemetry";
 import { Play, Pause, Eye, RotateCcw } from "lucide-react";
 
 interface TelemetryCanvasProps {
@@ -11,6 +12,8 @@ interface TelemetryCanvasProps {
   className?: string;
   isLive?: boolean;
   streamSource?: "agent" | "waiting_for_agent" | "simulator";
+  sessionPhase?: SessionPhase;
+  phaseDetails?: string;
 }
 
 interface HoverInspectionData {
@@ -20,6 +23,7 @@ interface HoverInspectionData {
   brake: number;
   steer: number;
   rpm: number;
+  gear: number;
   distNorm: number;
   timeDeltaSec: number;
 }
@@ -31,6 +35,8 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
   className = "",
   isLive = false,
   streamSource = "waiting_for_agent",
+  sessionPhase = "WAITING_FOR_AGENT",
+  phaseDetails = "Очікування запуску Telemetry Agent...",
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -192,6 +198,8 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
     const sourceDist = isPausedRef.current && pausedSnapshot.current ? pausedSnapshot.current.distNorm : buffers.distNorm;
 
     const timeDeltaSec = ((pointOffset - cap) / 60);
+    const latest = buffers.latestPacket.current;
+    const currentRawGear = latest ? latest.gear : 1;
 
     setHoverData({
       x: mouseX,
@@ -200,6 +208,7 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
       brake: Math.round(sourceBrake[bufferPos] * 100),
       steer: parseFloat((sourceSteer[bufferPos] * 180).toFixed(1)),
       rpm: Math.round(sourceRpm[bufferPos]),
+      gear: currentRawGear,
       distNorm: parseFloat(sourceDist[bufferPos].toFixed(3)),
       timeDeltaSec: parseFloat(timeDeltaSec.toFixed(2)),
     });
@@ -331,17 +340,61 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
         {/* Standby / Waiting for Agent Overlay */}
         {!isLive && !isPaused && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px]">
-            <div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-950/60 px-4 py-1.5 text-xs font-mono text-amber-300 shadow-xl">
+            <div
+              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-mono shadow-xl ${
+                sessionPhase === "IN_LOBBY"
+                  ? "border-amber-500/40 bg-amber-950/70 text-amber-300"
+                  : sessionPhase === "IN_GARAGE"
+                  ? "border-cyan-500/40 bg-cyan-950/70 text-cyan-300"
+                  : sessionPhase === "IN_PIT_LANE"
+                  ? "border-orange-500/40 bg-orange-950/70 text-orange-300"
+                  : sessionPhase === "SESSION_PAUSED"
+                  ? "border-blue-500/40 bg-blue-950/70 text-blue-300"
+                  : "border-rose-500/40 bg-rose-950/70 text-rose-300"
+              }`}
+            >
               <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+                <span
+                  className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${
+                    sessionPhase === "IN_LOBBY"
+                      ? "bg-amber-400"
+                      : sessionPhase === "IN_GARAGE"
+                      ? "bg-cyan-400"
+                      : sessionPhase === "IN_PIT_LANE"
+                      ? "bg-orange-400"
+                      : sessionPhase === "SESSION_PAUSED"
+                      ? "bg-blue-400"
+                      : "bg-rose-400"
+                  }`}
+                ></span>
+                <span
+                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                    sessionPhase === "IN_LOBBY"
+                      ? "bg-amber-500"
+                      : sessionPhase === "IN_GARAGE"
+                      ? "bg-cyan-500"
+                      : sessionPhase === "IN_PIT_LANE"
+                      ? "bg-orange-500"
+                      : sessionPhase === "SESSION_PAUSED"
+                      ? "bg-blue-500"
+                      : "bg-rose-500"
+                  }`}
+                ></span>
               </span>
               <span className="font-semibold tracking-wider uppercase">
-                Awaiting Telemetry Agent / Track Session
+                {sessionPhase === "IN_LOBBY"
+                  ? "Агент підключений • В лобі / Меню"
+                  : sessionPhase === "IN_GARAGE"
+                  ? "Бокси / Гараж • Налаштування сетапу"
+                  : sessionPhase === "IN_PIT_LANE"
+                  ? "Піт-лейн • Обмежувач активний (10 Гц)"
+                  : sessionPhase === "SESSION_PAUSED"
+                  ? "Сесію призупинено в меню паузи"
+                  : "Очікування запуску Telemetry Agent"}
               </span>
             </div>
             <p className="mt-2 text-[11px] font-mono text-gray-400">
-              Start Assetto Corsa Competizione and drive out of pit lane to stream live telemetry
+              {phaseDetails}
             </p>
           </div>
         )}
@@ -366,8 +419,9 @@ export const TelemetryCanvas: React.FC<TelemetryCanvasProps> = ({
               {visibleChannels.speed && (
                 <div className="text-cyan-400 font-bold">{hoverData.speed} km/h</div>
               )}
+              <div className="text-purple-400 font-bold">G: {formatGear(hoverData.gear)}</div>
               {visibleChannels.throttle && (
-                <div className="text-emerald-400 font-bold">G: {hoverData.gas}%</div>
+                <div className="text-emerald-400 font-bold">T: {hoverData.gas}%</div>
               )}
               {visibleChannels.brake && (
                 <div className="text-rose-400 font-bold">B: {hoverData.brake}%</div>

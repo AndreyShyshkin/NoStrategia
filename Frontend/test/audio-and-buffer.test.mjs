@@ -1,6 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AudioPriority } from "../src/types/telemetry.js";
+import { AudioPriority, formatGear, formatLapTime } from "../src/types/telemetry.js";
+
+test("ACC Gear and Lap Time Formatting Test", () => {
+  assert.equal(formatGear(0), "R", "ACC raw 0 must be Reverse");
+  assert.equal(formatGear(1), "N", "ACC raw 1 must be Neutral");
+  assert.equal(formatGear(2), "1", "ACC raw 2 must be 1st gear");
+  assert.equal(formatGear(3), "2", "ACC raw 3 must be 2nd gear");
+  assert.equal(formatGear(4), "3", "ACC raw 4 must be 3rd gear");
+  assert.equal(formatGear(7), "6", "ACC raw 7 must be 6th gear");
+  assert.equal(formatGear(-1), "R", "ACC raw -1 fallback Reverse");
+
+  // 82476 ms = 1 min, 22 sec, 476 ms -> "01:22.476"
+  assert.equal(formatLapTime(82476), "01:22.476");
+  assert.equal(formatLapTime(0), "00:00.000");
+});
 
 test("Telemetry Circular Ring Buffer Test", () => {
   const CAPACITY = 600;

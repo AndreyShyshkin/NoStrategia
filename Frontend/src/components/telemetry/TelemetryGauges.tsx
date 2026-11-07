@@ -2,28 +2,35 @@
 
 import React, { useEffect, useState } from "react";
 import { TelemetryBuffers } from "../../hooks/useTelemetryWebSocket";
-import { Gauge, Activity, Fuel, Compass, Flag } from "lucide-react";
+import { formatGear, formatLapTime, SessionPhase } from "../../types/telemetry";
+import { Gauge, Activity, Fuel, Compass, Flag, Clock } from "lucide-react";
 
 interface TelemetryGaugesProps {
   buffers: TelemetryBuffers;
   isLive?: boolean;
+  sessionPhase?: SessionPhase;
 }
 
-export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLive = false }) => {
-  // We read latest metrics at an interval (~15-20Hz) to update DOM badges without choking React
+export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({
+  buffers,
+  isLive = false,
+  sessionPhase = "WAITING_FOR_AGENT",
+}) => {
   const [metrics, setMetrics] = useState({
     speed: 0,
     gas: 0,
     brake: 0,
     steer: 0,
-    gear: 0,
+    gear: 1, // 1 in ACC is Neutral ('N')
     rpm: 0,
     distNorm: 0,
-    lap: 1,
+    lap: 0,
     sector: 0,
-    fuel: 52.4,
+    fuel: 0,
     latG: 0,
     longG: 0,
+    lapTimeMs: 0,
+    pressures: [0, 0, 0, 0] as [number, number, number, number],
   });
 
   useEffect(() => {
@@ -35,29 +42,46 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLiv
           gas: 0,
           brake: 0,
           steer: 0,
-          gear: 0,
+          gear: 1, // Neutral
           rpm: 0,
           latG: 0,
           longG: 0,
+          lapTimeMs: 0,
         }));
         return;
       }
 
       const latest = buffers.latestPacket.current;
       if (latest) {
+        // Convert radians to degrees: steerDeg = p.SteerAngle * (180.0f / MathF.PI)
+        const steerDeg = typeof latest.steer === "number"
+          ? Math.abs(latest.steer) <= 1.0
+            ? latest.steer * (180.0 / Math.PI)
+            : latest.steer
+          : 0;
+
         setMetrics({
           speed: Math.round(latest.speed),
           gas: Math.round(latest.gas * 100),
           brake: Math.round(latest.brake * 100),
-          steer: parseFloat((latest.steer * 180).toFixed(1)),
+          steer: parseFloat(steerDeg.toFixed(1)),
           gear: latest.gear,
           rpm: latest.rpm,
           distNorm: parseFloat(latest.distNorm.toFixed(3)),
           lap: latest.lap,
           sector: latest.currentSector,
-          fuel: latest.fuel ?? 50.0,
+          fuel: parseFloat((latest.fuel ?? 50.0).toFixed(1)),
           latG: latest.latG,
           longG: latest.longG,
+          lapTimeMs: latest.iCurrentTime ?? 0,
+          pressures: (latest.wheelsPressure && latest.wheelsPressure.length === 4
+            ? [
+                parseFloat(latest.wheelsPressure[0].toFixed(1)),
+                parseFloat(latest.wheelsPressure[1].toFixed(1)),
+                parseFloat(latest.wheelsPressure[2].toFixed(1)),
+                parseFloat(latest.wheelsPressure[3].toFixed(1)),
+              ]
+            : [0, 0, 0, 0]) as [number, number, number, number],
         });
       }
     }, 50);
@@ -67,6 +91,7 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLiv
 
   const rpmPercent = Math.min(100, Math.max(0, (metrics.rpm / 8500) * 100));
   const isShiftWarning = metrics.rpm > 7300;
+  const gearText = isLive ? formatGear(metrics.gear) : "N";
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -75,7 +100,7 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLiv
         <span className="text-[11px] font-mono uppercase tracking-wider text-gray-400">Current Gear</span>
         <div className="my-1 flex items-baseline gap-1">
           <span className="text-4xl font-black font-mono text-cyan-400">
-            {metrics.gear === -1 ? "R" : metrics.gear === 0 ? "N" : metrics.gear}
+            {gearText}
           </span>
         </div>
         <div className="w-full">
@@ -170,18 +195,18 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLiv
       {/* 5. Lap & Sector Status */}
       <div className="col-span-1 flex flex-col justify-between rounded-xl border border-gray-800 bg-[#0d1117] p-3 shadow-lg">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-gray-400">Session Lap</span>
-          <Flag className="h-4 w-4 text-emerald-400" />
+          <span className="text-[11px] font-mono uppercase tracking-wider text-gray-400">Lap Timing</span>
+          <Clock className="h-4 w-4 text-emerald-400" />
         </div>
-        <div className="my-1 flex items-baseline gap-2">
-          <span className="text-2xl font-bold font-mono text-white">Lap {metrics.lap}</span>
-          <span className="text-xs font-mono text-emerald-400 font-bold">Sec {metrics.sector + 1}</span>
+        <div className="my-1 flex flex-col">
+          <span className="text-xl font-bold font-mono text-emerald-400 tracking-tight">
+            {isLive ? formatLapTime(metrics.lapTimeMs) : "00:00.000"}
+          </span>
+          <span className="text-[10px] font-mono text-gray-400">
+            Lap {metrics.lap} • Sec {metrics.sector + 1}
+          </span>
         </div>
         <div className="w-full">
-          <div className="flex justify-between text-[10px] font-mono text-gray-500">
-            <span>Lap Progress</span>
-            <span>{Math.round(metrics.distNorm * 100)}%</span>
-          </div>
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-900">
             <div
               className="h-full bg-emerald-400 transition-all duration-100"
@@ -191,19 +216,23 @@ export const TelemetryGauges: React.FC<TelemetryGaugesProps> = ({ buffers, isLiv
         </div>
       </div>
 
-      {/* 6. Fuel & Efficiency */}
+      {/* 6. Fuel & Tyre Pressures */}
       <div className="col-span-1 flex flex-col justify-between rounded-xl border border-gray-800 bg-[#0d1117] p-3 shadow-lg">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-gray-400">Fuel Tank</span>
+          <span className="text-[11px] font-mono uppercase tracking-wider text-gray-400">Fuel & Tyres</span>
           <Fuel className="h-4 w-4 text-amber-500" />
         </div>
         <div className="my-1 flex items-baseline gap-1">
-          <span className="text-2xl font-bold font-mono text-white">{metrics.fuel}</span>
+          <span className="text-2xl font-bold font-mono text-white">
+            {isLive && metrics.fuel > 0 ? metrics.fuel : "--"}
+          </span>
           <span className="text-xs font-mono text-gray-400">Liters</span>
         </div>
         <div className="flex items-center justify-between text-[10px] font-mono text-gray-400">
           <span>Est. Laps:</span>
-          <span className="font-bold text-amber-400">{Math.floor(metrics.fuel / 2.85)} laps</span>
+          <span className="font-bold text-amber-400">
+            {metrics.fuel > 0 ? `${Math.floor(metrics.fuel / 2.85)}` : "--"}
+          </span>
         </div>
       </div>
     </div>

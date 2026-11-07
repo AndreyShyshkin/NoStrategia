@@ -7,6 +7,7 @@ import {
   WebSocketServerMessage,
   WebSocketClientMessage,
   GatewayStatusMessage,
+  SessionPhase,
   formatCarModel,
   formatTrackName,
 } from "../types/telemetry";
@@ -43,11 +44,15 @@ export function useTelemetryWebSocket({
   const [lastPing, setLastPing] = useState<number>(0);
   const [serverStatus, setServerStatus] = useState<string>("Disconnected");
 
-  // Telemetry stream state
+  // Advanced Agent & Game Session tracking matching TelemetryAgent
   const [streamSource, setStreamSource] = useState<"agent" | "waiting_for_agent" | "simulator">("waiting_for_agent");
   const [isLive, setIsLive] = useState<boolean>(false);
-  const [carModel, setCarModel] = useState<string>("Waiting for Car...");
-  const [track, setTrack] = useState<string>("Waiting for Track...");
+  const [agentConnected, setAgentConnected] = useState<boolean>(false);
+  const [sessionPhase, setSessionPhase] = useState<SessionPhase>("WAITING_FOR_AGENT");
+  const [phaseDetails, setPhaseDetails] = useState<string>("Очікування запуску Telemetry Agent...");
+  const [showCarAndTrack, setShowCarAndTrack] = useState<boolean>(false);
+  const [carModel, setCarModel] = useState<string>("");
+  const [track, setTrack] = useState<string>("");
   const [simulationEnabled, setSimulationEnabled] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -113,21 +118,52 @@ export function useTelemetryWebSocket({
 
           if (data.type === "FAST_PACKET") {
             setIsLive(true);
-            setStreamSource(simulationEnabled ? "simulator" : "agent");
+            setAgentConnected(true);
 
-            if (data.carModel && data.carModel !== "unknown") {
-              setCarModel(formatCarModel(data.carModel));
-            }
-            if (data.track && data.track !== "unknown") {
-              setTrack(formatTrackName(data.track));
+            // Determine phase from incoming packet
+            if (data.status === 0) {
+              setSessionPhase("IN_LOBBY");
+              setPhaseDetails("Гра в лобі / вибір автомобіля");
+              setShowCarAndTrack(false);
+              setCarModel("");
+              setTrack("");
+            } else {
+              if (data.isInPitLane === 1) {
+                setSessionPhase("IN_PIT_LANE");
+                setPhaseDetails("Піт-лейн (обмежувач швидкості активний, 10 Гц)");
+              } else if (data.isInPit === 1 || (data.speed < 1.0 && data.gas === 0 && data.brake === 0)) {
+                setSessionPhase("IN_GARAGE");
+                setPhaseDetails("Бокси / Меню налаштування сетапу автомобіля");
+              } else if (data.status === 3) {
+                setSessionPhase("SESSION_PAUSED");
+                setPhaseDetails("Сесію призупинено в меню паузи");
+              } else if (data.status === 1) {
+                setSessionPhase("REPLAY");
+                setPhaseDetails("Перегляд повтору (Replay Mode)");
+              } else {
+                setSessionPhase("LIVE_ON_TRACK");
+                setPhaseDetails("Assetto Corsa Competizione (Бойовий заїзд 60 Гц)");
+              }
+
+              setShowCarAndTrack(true);
+              if (data.carModel && data.carModel !== "unknown") {
+                setCarModel(formatCarModel(data.carModel));
+              }
+              if (data.track && data.track !== "unknown") {
+                setTrack(formatTrackName(data.track));
+              }
             }
 
-            // Reset inactivity timer
+            // Reset inactivity timer (after 2.5s of no packets, player is in lobby)
             if (liveInactivityTimerRef.current) clearTimeout(liveInactivityTimerRef.current);
             liveInactivityTimerRef.current = setTimeout(() => {
               setIsLive(false);
-              setStreamSource("waiting_for_agent");
-            }, 2200);
+              setSessionPhase("IN_LOBBY");
+              setPhaseDetails("Агент підключений • Гра в лобі / вибір авто");
+              setShowCarAndTrack(false);
+              setCarModel("");
+              setTrack("");
+            }, 2500);
 
             const b = buffers.current;
             const idx = b.headIndex.current % b.capacity;
@@ -145,13 +181,20 @@ export function useTelemetryWebSocket({
             b.latestPacket.current = data;
           } else if (data.type === "GATEWAY_STATUS") {
             setStreamSource(data.source);
+            setAgentConnected(data.agentConnected);
             setSimulationEnabled(data.simulationEnabled);
-            if (data.carModel && data.carModel !== "Waiting for Car...") {
+            setSessionPhase(data.sessionPhase);
+            setPhaseDetails(data.phaseDetails);
+            setShowCarAndTrack(data.showCarAndTrack);
+
+            if (data.showCarAndTrack && data.carModel) {
               setCarModel(formatCarModel(data.carModel));
-            }
-            if (data.track && data.track !== "Waiting for Track...") {
               setTrack(formatTrackName(data.track));
+            } else if (!data.showCarAndTrack) {
+              setCarModel("");
+              setTrack("");
             }
+
             if (!data.isLive) {
               setIsLive(false);
             }
@@ -164,7 +207,7 @@ export function useTelemetryWebSocket({
             setLastPing(Math.max(1, now - data.timestamp));
           }
         } catch (e) {
-          // Skip malformed packets without breaking the stream
+          // Skip malformed packets
         }
       };
 
@@ -172,6 +215,8 @@ export function useTelemetryWebSocket({
         setIsConnected(false);
         setIsConnecting(false);
         setIsLive(false);
+        setSessionPhase("WAITING_FOR_AGENT");
+        setShowCarAndTrack(false);
         setServerStatus("Disconnected");
         if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
 
@@ -189,7 +234,7 @@ export function useTelemetryWebSocket({
       setIsConnecting(false);
       setServerStatus("Connection Failed");
     }
-  }, [url, simulationEnabled]);
+  }, [url]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
@@ -203,6 +248,8 @@ export function useTelemetryWebSocket({
     setIsConnected(false);
     setIsConnecting(false);
     setIsLive(false);
+    setSessionPhase("WAITING_FOR_AGENT");
+    setShowCarAndTrack(false);
     setServerStatus("Disconnected");
   }, []);
 
@@ -252,6 +299,10 @@ export function useTelemetryWebSocket({
     serverStatus,
     streamSource,
     isLive,
+    agentConnected,
+    sessionPhase,
+    phaseDetails,
+    showCarAndTrack,
     carModel,
     track,
     simulationEnabled,
