@@ -11,7 +11,7 @@
     "gateway": "tsx server/gateway.ts",
     "gateway:dev": "tsx watch server/gateway.ts",
     "dev:all": "concurrently -k -p \"[{name}]\" -n \"GATEWAY,NEXT\" -c \"cyan.bold,magenta.bold\" \"npm run gateway\" \"npm run dev\"",
-    "test": "node --test"
+    "test": "tsx --test test/*.test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

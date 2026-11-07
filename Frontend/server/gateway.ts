@@ -33,8 +33,15 @@ export class TelemetryWebSocketGateway {
   private startTime: number = Date.now();
   private lastRedisPacketTime: number = 0;
   private totalPacketsSent: number = 0;
+  private port: number;
+  private host: string;
 
-  constructor() {
+  constructor(
+    port: number = parseInt(process.env.WS_PORT || "4001", 10),
+    host: string = process.env.WS_HOST || "0.0.0.0"
+  ) {
+    this.port = port;
+    this.host = host;
     this.simulator = new SpaTelemetrySimulator();
     this.redisConsumer = new RedisTelemetryConsumer();
 
@@ -242,9 +249,9 @@ export class TelemetryWebSocketGateway {
     }, TICK_INTERVAL_MS);
 
     return new Promise<void>((resolve) => {
-      this.server.listen(PORT, HOST, () => {
-        console.log(`[WS Gateway] Server listening on http://${HOST}:${PORT}`);
-        console.log(`[WS Gateway] WebSocket stream ready at ws://${HOST}:${PORT}/ws/stream`);
+      this.server.listen(this.port, this.host, () => {
+        console.log(`[WS Gateway] Server listening on http://${this.host}:${this.port}`);
+        console.log(`[WS Gateway] WebSocket stream ready at ws://${this.host}:${this.port}/ws/stream`);
         console.log(`[WS Gateway] Target Tick Rate: ${TICK_RATE_HZ} FPS (interval: ${TICK_INTERVAL_MS}ms)`);
         resolve();
       });
